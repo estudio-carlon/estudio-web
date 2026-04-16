@@ -191,11 +191,11 @@ def deudas():
     c = conn.cursor()
 
     c.execute("""
-    SELECT clientes.nombre, SUM(debe-haber)
-    FROM cuentas
-    JOIN clientes ON clientes.id = cuentas.cliente_id
-    GROUP BY clientes.nombre
-    HAVING SUM(debe-haber) > 0
+        SELECT clientes.nombre, SUM(debe-haber)
+        FROM cuentas
+        JOIN clientes ON clientes.id = cuentas.cliente_id
+        GROUP BY clientes.nombre
+        HAVING SUM(debe-haber) > 0
     """)
 
     data = c.fetchall()
@@ -206,8 +206,6 @@ def deudas():
         html += f"{d[0]} → ${d[1]}<br>"
 
     return html
-
-import os
 
 if _name_ == "_main_":
     port = int(os.environ.get("PORT", 10000))
