@@ -1,14 +1,14 @@
-from flask import Flask, request, redirect, session, send_file
+from flask import Flask, request, redirect, session
 import psycopg2
-import os 
+import os
 from werkzeug.security import generate_password_hash, check_password_hash
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from datetime import datetime
 
-app = Flask(__name__)
+app = Flask(_name_)
 app.secret_key = "super_secret_key"
-DB_URL=os.getenv("DB_URL")
+DB_URL = os.getenv("DB_URL")
 
 
 def conectar():
@@ -86,7 +86,7 @@ def panel():
     <a href='/deudas'>🔔 Deudas</a><br>
     """
 
-# ================= CREAR USUARIO =================
+# ================= CREAR ADMIN =================
 @app.route("/crear_admin")
 def crear_admin():
     conn = conectar()
@@ -134,19 +134,18 @@ def cuenta(id):
         pago = float(request.form["pago"])
 
         c.execute("SELECT haber FROM cuentas WHERE cliente_id=%s AND periodo=%s",
-                  (id,periodo))
+                  (id, periodo))
         data = c.fetchone()
 
         if data:
             nuevo = data[0] + pago
             c.execute("UPDATE cuentas SET haber=%s WHERE cliente_id=%s AND periodo=%s",
-                      (nuevo,id,periodo))
+                      (nuevo, id, periodo))
         else:
             c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,%s)",
-                      (id,periodo,pago,pago))
+                      (id, periodo, pago, pago))
 
         conn.commit()
-
         generar_pdf(id, periodo, pago)
 
     c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s", (id,))
@@ -174,8 +173,11 @@ def generar_pdf(cliente_id, periodo, monto):
     archivo = f"recibo_{datetime.now().timestamp()}.pdf"
     c = canvas.Canvas(archivo)
 
-    logo = ImageReader("logo.png")
-    c.drawImage(logo, 50, 730, width=120, height=60)
+    try:
+        logo = ImageReader("logo.png")
+        c.drawImage(logo, 50, 730, width=120, height=60)
+    except:
+        pass
 
     c.drawString(200,750,"RECIBO DE PAGO")
     c.drawString(50,650,f"Cliente ID: {cliente_id}")
@@ -206,7 +208,3 @@ def deudas():
         html += f"{d[0]} → ${d[1]}<br>"
 
     return html
-
-if _name_ == "_main_":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
