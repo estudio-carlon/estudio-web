@@ -1,5 +1,5 @@
-flask
+Flask
+gunicorn
 reportlab
 pandas
 openpyxl
-gunicorn
