@@ -10,6 +10,7 @@ app = Flask(__name__)
 app.secret_key = "super_secret_key"
 DB_URL=os.getenv("DB_URL")
 
+
 def conectar():
     return psycopg2.connect(DB_URL)
 
