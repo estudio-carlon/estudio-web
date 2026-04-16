@@ -1,5 +1,6 @@
 from flask import Flask, request, redirect, session, send_file
 import psycopg2
+import os 
 from werkzeug.security import generate_password_hash, check_password_hash
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -7,9 +8,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
-
-# 🔴 PEGAR ACA TU URL DE SUPABASE
-DB_URL = "PEGAR_ACA_TU_CONEXION"
+DB_URL=os.getenv("DB_URL")
 
 def conectar():
     return psycopg2.connect(DB_URL)
