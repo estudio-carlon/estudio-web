@@ -3,3 +3,4 @@ gunicorn
 reportlab
 pandas
 openpyxl
+psycopg2-binary
