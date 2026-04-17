@@ -68,6 +68,23 @@ def actualizar_db():
     conn.close()
 
 actualizar_db()
+def limpiar_duplicados():
+    conn = conectar()
+    c = conn.cursor()
+
+    c.execute("""
+        DELETE FROM clientes
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM clientes
+            GROUP BY nombre
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+limpiar_duplicados()
 # ================= LOGIN =================
 @app.route("/", methods=["GET","POST"])
 def login():
