@@ -249,7 +249,8 @@ Pago:<input name='pago'>
 <button>Pagar</button>
 </form>
 """
-    return html
+
+return html
 
 # ================= PDF =================
 def generar_pdf(cliente_id, periodo, monto):
