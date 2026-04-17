@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS cuentas(
     haber REAL
 )
 """)
-    conn.commit()
-    conn.close()
+conn.commit()
+conn.close()
 
 init_db()
 
