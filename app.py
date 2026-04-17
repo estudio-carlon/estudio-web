@@ -213,17 +213,17 @@ def cuenta(id):
                       (id, periodo, pago, pago))
 
         conn.commit()
-        archivo = generar_pdf(id, periodo, pago)
+        generar_pdf(id, periodo, pago)
 
     c.execute("""
-    SELECT periodo,debe,haber 
-    FROM cuentas 
-    WHERE cliente_id=%s 
-    ORDER BY periodo DESC
-""", (id,))
+        SELECT periodo,debe,haber 
+        FROM cuentas 
+        WHERE cliente_id=%s 
+        ORDER BY periodo DESC
+    """, (id,))
     datos = c.fetchall()
 
-html = "<h2>Cuenta</h2>"
+    html = "<h2>Cuenta</h2>"
 
     for d in datos:
         saldo = d[1] - d[2]
@@ -233,8 +233,8 @@ html = "<h2>Cuenta</h2>"
         else:
             estado = f"🔴 DEBE ${saldo}"
 
+        telefono = ""  # después lo mejoramos
         mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
-        telefono = ""  # ⚠️ (esto lo agrego porque sino rompe)
         link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
 
         html += f"""
