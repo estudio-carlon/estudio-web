@@ -85,6 +85,37 @@ def limpiar_duplicados():
     conn.close()
 
 limpiar_duplicados()
+def generar_deuda_mensual():
+    conn = conectar()
+    c = conn.cursor()
+
+    from datetime import datetime
+    periodo = datetime.now().strftime("%m/%Y")
+
+    # Traer todos los clientes
+    c.execute("SELECT id, abono FROM clientes")
+    clientes = c.fetchall()
+
+    for cliente_id, abono in clientes:
+
+        # Verificar si ya existe ese mes
+        c.execute("""
+            SELECT id FROM cuentas
+            WHERE cliente_id=%s AND periodo=%s
+        """, (cliente_id, periodo))
+
+        existe = c.fetchone()
+
+        if not existe:
+            c.execute("""
+                INSERT INTO cuentas(cliente_id, periodo, debe, haber)
+                VALUES(%s,%s,%s,0)
+            """, (cliente_id, periodo, abono))
+
+    conn.commit()
+    conn.close()
+
+generar_deuda_mensual()
 # ================= LOGIN =================
 @app.route("/", methods=["GET","POST"])
 def login():
