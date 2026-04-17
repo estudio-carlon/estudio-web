@@ -182,7 +182,7 @@ def cuenta(id):
                       (id, periodo, pago, pago))
 
         conn.commit()
-        generar_pdf(id, periodo, pago)
+        archivo = generar_pdf(id, periodo, pago)
 
     c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s", (id,))
     datos = c.fetchall()
@@ -192,7 +192,10 @@ def cuenta(id):
     for d in datos:
         saldo = d[1] - d[2]
         estado = "PAGADO" if saldo <= 0 else "ADEUDA"
-        html += f"{d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}<br>"
+html += f"""
+{d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
+<a href='/recibo/{id}/{d[0]}'>📄 Recibo</a><br>
+"""
 
     html += """
     <form method='post'>
@@ -283,4 +286,9 @@ def importar():
     </form>
     <br><a href='/panel'>← Volver</a>
     """
+    @app.route("/recibo/<int:cliente_id>/<periodo>")
+def ver_recibo(cliente_id, periodo):
+    archivo = f"recibo_{cliente_id}_{periodo}.pdf"
+    return send_file(archivo, as_attachment=True)
+    
     # cambio para redeploy
