@@ -356,9 +356,75 @@ def importar():
     </form>
     <br><a href='/panel'>← Volver</a>
     """
+from io import BytesIO
+
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
 def ver_recibo(cliente_id, periodo):
-    archivo = f"recibo_{cliente_id}_{periodo}.pdf"
-    return send_file(archivo, as_attachment=True)
-    
+
+    conn = conectar()
+    c = conn.cursor()
+
+    # Traer datos del cliente
+    c.execute("""
+        SELECT nombre FROM clientes WHERE id=%s
+    """, (cliente_id,))
+    cliente = c.fetchone()[0]
+
+    # Traer monto
+    c.execute("""
+        SELECT haber FROM cuentas
+        WHERE cliente_id=%s AND periodo=%s
+    """, (cliente_id, periodo))
+
+    data = c.fetchone()
+    monto = data[0] if data else 0
+
+    # Crear PDF en memoria
+    buffer = BytesIO()
+    c_pdf = canvas.Canvas(buffer)
+
+    # ===== LOGO (opcional) =====
+    try:
+        logo = ImageReader("logo.png")  # subí un logo al proyecto
+        c_pdf.drawImage(logo, 50, 730, width=100, height=50)
+    except:
+        pass
+
+    # ===== TITULO =====
+    c_pdf.setFont("Helvetica-Bold", 18)
+    c_pdf.drawString(180, 750, "RECIBO DE PAGO")
+
+    # ===== DATOS EMPRESA =====
+    c_pdf.setFont("Helvetica", 10)
+    c_pdf.drawString(50, 700, "Estudio Carlon")
+    c_pdf.drawString(50, 685, "CUIT: 20-XXXXXXXX-X")
+
+    # ===== DATOS RECIBO =====
+    c_pdf.drawString(350, 700, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+    c_pdf.drawString(350, 685, f"Periodo: {periodo}")
+
+    # ===== CLIENTE =====
+    c_pdf.setFont("Helvetica-Bold", 12)
+    c_pdf.drawString(50, 640, f"Cliente: {cliente}")
+
+    # ===== MONTO =====
+    c_pdf.setFont("Helvetica-Bold", 14)
+    c_pdf.drawString(50, 600, f"Importe abonado: ${monto}")
+
+    # ===== CAJA =====
+    c_pdf.rect(45, 580, 500, 80)
+
+    # ===== FIRMA =====
+    c_pdf.setFont("Helvetica", 10)
+    c_pdf.drawString(50, 520, "________")
+    c_pdf.drawString(50, 505, "Firma")
+
+    c_pdf.save()
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=False   # 👈 abre en navegador
+    )
     # cambio para redeploy
