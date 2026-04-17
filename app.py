@@ -465,7 +465,7 @@ qr_image = ImageReader(qr_buffer)
 # Posición del QR
 c.drawImage(qr_image, width - 150, 50, width=100, height=100)
 
-    c.save()
+c.save()
     buffer.seek(0)
     conn.close()
 
