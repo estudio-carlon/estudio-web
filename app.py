@@ -215,14 +215,22 @@ def cuenta(id):
         conn.commit()
         archivo = generar_pdf(id, periodo, pago)
 
-    c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s", (id,))
+    c.execute("""
+    SELECT periodo,debe,haber 
+    FROM cuentas 
+    WHERE cliente_id=%s 
+    ORDER BY periodo DESC
+""", (id,))
     datos = c.fetchall()
 
     html = "<h2>Cuenta</h2>"
 
     for d in datos:
         saldo = d[1] - d[2]
-        estado = "PAGADO" if saldo <= 0 else "ADEUDA"
+        if saldo <= 0:
+    estado = "✅ PAGADO"
+else:
+    estado = f"🔴 DEBE ${saldo}"
 html += f"""
 {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
 <a href='/recibo/{id}/{d[0]}'>📄 Descargar Recibo</a><br>
