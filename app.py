@@ -208,3 +208,50 @@ def deudas():
         html += f"{d[0]} → ${d[1]}<br>"
 
     return html
+
+import pandas as pd
+
+@app.route("/importar", methods=["GET","POST"])
+def importar():
+    if request.method == "POST":
+        file = request.files["file"]
+
+        df = pd.read_excel(file)
+
+        conn = conectar()
+        c = conn.cursor()
+
+        for _, row in df.iterrows():
+            nombre = str(row.get("nombre", "")).strip()
+            cuit = str(row.get("cuit", "")).strip()
+            telefono = str(row.get("telefono", "")).strip()
+
+            try:
+                abono = float(row.get("abono", 0))
+            except:
+                abono = 0
+
+            c.execute("SELECT id FROM clientes WHERE nombre=%s", (nombre,))
+            existe = c.fetchone()
+
+            if not existe:
+                c.execute("""
+                    INSERT INTO clientes(nombre,cuit,telefono,abono)
+                    VALUES(%s,%s,%s,%s)
+                """, (nombre, cuit, telefono, abono))
+
+        conn.commit()
+        conn.close()
+
+        return "✅ Importación completada"
+
+    return """
+    <h2>📥 Importar Clientes</h2>
+
+    <a href='/clientes'>⬅ Volver</a><br><br>
+
+    <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file">
+        <button>Subir Excel</button>
+    </form>
+    """
