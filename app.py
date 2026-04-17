@@ -2,6 +2,8 @@ from flask import Flask, request, redirect, session, send_file
 import psycopg2
 import os
 import pandas as pd
+import qrcode
+import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -312,12 +314,14 @@ def cuenta(id):
     for d in datos:
         saldo = d[1] - d[2]
         estado = "PAGADO" if saldo <= 0 else f"DEBE ${saldo}"
+        
+        link_pago = crear_link_pago(saldo, f"Pago {d[0]}")
 
         c.execute("SELECT telefono FROM clientes WHERE id=%s", (id,))
         tel = c.fetchone()[0] or ""
         telefono = tel.replace(" ", "").replace("+", "")
 
-        mensaje = f"Hola, tenés pendiente {d[0]} por ${saldo}"
+        mensaje = f"Hola, podés pagar tu periodo {d[0]} por ${saldo}: {link_pago}"
         link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
 
         html += f"""
@@ -325,6 +329,7 @@ def cuenta(id):
 {d[0]} | {estado}<br>
 <a href='/recibo/{id}/{d[0].replace("/", "-")}' target='_blank'>Ver</a> |
 <a href='/recibo/{id}/{d[0].replace("/", "-")}?download=1'>Descargar</a> |
+<a href='{link_pago}' target='_blank'>💳 Pagar</a> |
 <a href='{link}' target='_blank'>WhatsApp</a>
 </div><br>
 """
@@ -409,12 +414,86 @@ def generar_pdf(cliente_id, periodo, monto):
 
     c.line(width - 200, height - 450, width - 40, height - 450)
     c.drawString(width - 200, height - 465, "Aclaración")
+# ===== DATOS BANCARIOS =====
+c.setFont("Helvetica", 9)
+c.drawString(40, 120, "Datos para transferencia:")
+c.drawString(40, 105, "Titular: Alexis Natasha Carlon")
+c.drawString(40, 90, "CUIL: 27-35045505-7")
+c.drawString(40, 75, "Banco: Banco Nación")
+c.drawString(40, 60, "Cuenta: CA $ 28324201345252")
+c.drawString(40, 45, "CBU: 0110420630042013452529")
+c.drawString(40, 30, "Alias: ESTUDIO.CONTA.CARLON")
+c.setFont("Helvetica-Bold", 10)
+c.drawString(width - 160, 160, "Escaneá para pagar")
+
+# ===== QR DE PAGO =====
+qr_data = f"""
+Transferencia bancaria
+Titular: Alexis Natasha Carlon
+CUIL: 27-35045505-7
+CBU: 0110420630042013452529
+Alias: ESTUDIO.CONTA.CARLON
+Banco: Nación
+
+Monto: ${monto}
+Cliente: {cliente}
+Periodo: {periodo}
+"""
+
+# ===== QR DE PAGO =====
+qr_data = f"""
+Transferencia bancaria
+Titular: Alexis Natasha Carlon
+CUIL: 27-35045505-7
+CBU: 0110420630042013452529
+Alias: ESTUDIO.CONTA.CARLON
+Banco: Nación
+
+Monto: ${monto}
+Cliente: {cliente}
+Periodo: {periodo}
+"""
+
+qr = qrcode.make(qr_data)
+
+qr_buffer = BytesIO()
+qr.save(qr_buffer)
+qr_buffer.seek(0)
+
+qr_image = ImageReader(qr_buffer)
+
+# Posición del QR
+c.drawImage(qr_image, width - 150, 50, width=100, height=100)
 
     c.save()
     buffer.seek(0)
     conn.close()
 
     return buffer
+
+# ================= LINK =================
+def crear_link_pago(monto, descripcion):
+    url = "https://api.mercadopago.com/checkout/preferences"
+
+    headers = {
+        "Authorization": "Bearer TU_ACCESS_TOKEN"
+    }
+
+    data = {
+        "items": [
+            {
+                "title": descripcion,
+                "quantity": 1,
+                "unit_price": float(monto)
+            }
+        ]
+    }
+
+    r = requests.post(url, json=data, headers=headers)
+
+    if r.status_code == 201:
+        return r.json()["init_point"]
+    return "#"
 # ================= RECIBO =================
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
 def ver_recibo(cliente_id, periodo):
