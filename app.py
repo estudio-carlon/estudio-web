@@ -241,7 +241,7 @@ for d in datos:
     <a href='/recibo/{id}/{d[0]}'>🧾 Recibo</a> |
     <a href='{link}' target='_blank'>📲 WhatsApp</a><br>
     """
-
+return html
 html += """
 <form method='post'>
 Periodo:<input name='periodo'>
@@ -249,7 +249,7 @@ Pago:<input name='pago'>
 <button>Pagar</button>
 </form>
 """
-return html
+
 
 # ================= PDF =================
 def generar_pdf(cliente_id, periodo, monto):
