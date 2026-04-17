@@ -269,31 +269,50 @@ def generar_pdf(cliente_id, periodo, monto):
 
     c = canvas.Canvas(archivo)
 
-    # Título
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(180, 750, "RECIBO DE PAGO")
+# ================= LOGO =================
+from reportlab.lib.utils import ImageReader
+import os
 
-    # Datos
-    c.setFont("Helvetica", 11)
-    c.drawString(50, 700, f"N° Recibo: {nro}")
-    c.drawString(50, 680, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
-    c.drawString(50, 650, f"Cliente: {cliente}")
-    c.drawString(50, 630, f"Periodo: {periodo}")
+if os.path.exists("logo.png"):
+    logo = ImageReader("logo.png")
+    c.drawImage(logo, 50, 740, width=120, height=60)
 
-    # Monto grande
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, 590, f"Monto pagado: ${monto}")
+# ================= TITULO =================
+c.setFont("Helvetica-Bold", 12)
+c.drawString(200, 780, "ESTUDIO CARLON")
 
-    # Firma
-    c.setFont("Helvetica", 10)
-    c.drawString(50, 520, "________")
-    c.drawString(50, 500, "Firma")
+c.setFont("Helvetica-Bold", 16)
+c.drawString(200, 760, "RECIBO DE PAGO")
 
-    c.save()
+# Línea decorativa
+c.line(40, 730, 550, 730)
 
-    conn.close()
+# ================= DATOS =================
+from datetime import datetime
 
-    return archivo
+c.setFont("Helvetica", 11)
+c.drawString(50, 700, f"N° Recibo: {nro}")
+c.drawString(50, 680, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+c.drawString(50, 650, f"Cliente: {cliente}")
+c.drawString(50, 630, f"Periodo: {periodo}")
+
+# ================= MONTO =================
+c.setFont("Helvetica-Bold", 14)
+c.drawString(50, 590, f"Monto pagado: ${monto}")
+
+# Caja alrededor del monto
+c.rect(45, 570, 500, 40)
+
+# ================= FIRMA =================
+c.setFont("Helvetica", 10)
+c.drawString(50, 520, "________")
+c.drawString(50, 505, "Firma")
+
+  c.save()
+
+  conn.close()
+
+  return archivo
 # ================= DEUDAS =================
 @app.route("/deudas")
 def deudas():
