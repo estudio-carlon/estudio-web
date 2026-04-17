@@ -429,15 +429,15 @@ def ver_recibo(cliente_id, periodo):
         return "No hay datos"
 
     debe = data[0]
-haber = data[1]
+    haber = data[1]
 
-monto = haber if haber > 0 else debe
+    monto = haber if haber > 0 else debe
 
-pdf = generar_pdf(cliente_id, periodo, monto)
+    pdf = generar_pdf(cliente_id, periodo, monto)
 
-download = request.args.get("download")
+    download = request.args.get("download")
 
-return send_file(
+    return send_file(
         pdf,
         mimetype="application/pdf",
         as_attachment=True if download else False,
