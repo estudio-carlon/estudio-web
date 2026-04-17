@@ -356,7 +356,7 @@ def importar():
     </form>
     <br><a href='/panel'>← Volver</a>
     """
-   rom flask import send_file
+from flask import Flask, request, redirect, session, send_file
 
 @app.route("/recibo/<int:cliente_id>/<periodo>")
 def ver_recibo(cliente_id, periodo):
