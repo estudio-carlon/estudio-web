@@ -208,19 +208,15 @@ def cuenta(id):
 from flask import send_file
 
 def generar_pdf(cliente_id, periodo, monto):
-    archivo = f"recibo_{datetime.now().timestamp()}.pdf"
+    archivo = f"recibo_{cliente_id}_{periodo}.pdf"
+
     c = canvas.Canvas(archivo)
 
-    try:
-        logo = ImageReader("logo.png")
-        c.drawImage(logo, 50, 730, width=120, height=60)
-    except:
-        pass
-
     c.drawString(200,750,"RECIBO DE PAGO")
-    c.drawString(50,650,f"Cliente ID: {cliente_id}")
-    c.drawString(50,630,f"Periodo: {periodo}")
-    c.drawString(50,610,f"Monto: ${monto}")
+    c.drawString(50,700,f"Cliente ID: {cliente_id}")
+    c.drawString(50,680,f"Periodo: {periodo}")
+    c.drawString(50,660,f"Monto: ${monto}")
+    c.drawString(50,640,f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
 
     c.save()
 
