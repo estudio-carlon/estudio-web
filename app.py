@@ -440,20 +440,6 @@ Cliente: {cliente}
 Periodo: {periodo}
 """
 
-# ===== QR DE PAGO =====
-qr_data = f"""
-Transferencia bancaria
-Titular: Alexis Natasha Carlon
-CUIL: 27-35045505-7
-CBU: 0110420630042013452529
-Alias: ESTUDIO.CONTA.CARLON
-Banco: Nación
-
-Monto: ${monto}
-Cliente: {cliente}
-Periodo: {periodo}
-"""
-
 qr = qrcode.make(qr_data)
 
 qr_buffer = BytesIO()
