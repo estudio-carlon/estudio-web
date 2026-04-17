@@ -225,13 +225,13 @@ def cuenta(id):
 
     html = "<h2>Cuenta</h2>"
 
-    for d in datos:
-        saldo = d[1] - d[2]
-        if saldo <= 0:
-    estado = "✅ PAGADO"
-else:
-    estado = f"🔴 DEBE ${saldo}"
-saldo = d[1] - d[2]
+for d in datos:
+    saldo = d[1] - d[2]
+
+    if saldo <= 0:
+        estado = "✅ PAGADO"
+    else:
+        estado = f"🔴 DEBE ${saldo}"
 
 mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
 link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
