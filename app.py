@@ -435,9 +435,9 @@ monto = haber if haber > 0 else debe
 
 pdf = generar_pdf(cliente_id, periodo, monto)
 
-    download = request.args.get("download")
+download = request.args.get("download")
 
-    return send_file(
+return send_file(
         pdf,
         mimetype="application/pdf",
         as_attachment=True if download else False,
