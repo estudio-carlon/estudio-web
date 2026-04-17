@@ -465,11 +465,11 @@ qr_image = ImageReader(qr_buffer)
 # Posición del QR
 c.drawImage(qr_image, width - 150, 50, width=100, height=100)
 
-    c.save()
-    buffer.seek(0)
-    conn.close()
+c.save()
+buffer.seek(0)
+conn.close()
 
-    return buffer
+return buffer
 
 # ================= LINK =================
 def crear_link_pago(monto, descripcion):
