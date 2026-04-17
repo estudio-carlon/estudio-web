@@ -485,11 +485,11 @@ c.setFont("Helvetica", 10)
 c.drawString(50, 520, "________")
 c.drawString(50, 505, "Firma")
 
-  c.save()
+c.save()
 
-  conn.close()
+conn.close()
 
-  return archivo
+return archivo
 # ================= DEUDAS =================
 @app.route("/deudas")
 def deudas():
