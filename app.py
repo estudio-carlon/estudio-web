@@ -18,34 +18,36 @@ def conectar():
 def init_db():
     conn = conectar()
     c = conn.cursor()
+# USUARIOS
+c.execute("""
+CREATE TABLE IF NOT EXISTS usuarios(
+    id SERIAL PRIMARY KEY,
+    usuario TEXT,
+    clave TEXT
+)
+""")
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios(
-        id SERIAL PRIMARY KEY,
-        usuario TEXT,
-        clave TEXT
-    )
-    """)
+# CLIENTES 
+c.execute("""
+CREATE TABLE IF NOT EXISTS clientes(
+    id SERIAL PRIMARY KEY,
+    nombre TEXT,
+    cuit TEXT,
+    telefono TEXT,
+    abono REAL
+)
+""")
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS clientes(
-        id SERIAL PRIMARY KEY,
-        nombre TEXT,
-        telefono TEXT,
-        abono REAL
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS cuentas(
-        id SERIAL PRIMARY KEY,
-        cliente_id INTEGER,
-        periodo TEXT,
-        debe REAL,
-        haber REAL
-    )
-    """)
-
+# CUENTAS
+c.execute("""
+CREATE TABLE IF NOT EXISTS cuentas(
+    id SERIAL PRIMARY KEY,
+    cliente_id INTEGER,
+    periodo TEXT,
+    debe REAL,
+    haber REAL
+)
+""")
     conn.commit()
     conn.close()
 
