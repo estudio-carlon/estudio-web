@@ -1,6 +1,7 @@
 from flask import Flask, request, redirect, session
 import psycopg2
 import os
+import pandas as pd
 from werkzeug.security import generate_password_hash, check_password_hash
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -213,22 +214,25 @@ def deudas():
 
     return html
 
-import pandas as pd
 
-@app.route("/importar", methods=["GET", "POST"])
+@app.route("/importar", methods=["GET","POST"])
 def importar():
+
     if request.method == "POST":
         archivo = request.files["archivo"]
+
+        import pandas as pd
+
         df = pd.read_excel(archivo)
 
         conn = conectar()
         c = conn.cursor()
 
         for _, row in df.iterrows():
-            nombre = str(row.get("nombre", ""))
-            cuit = str(row.get("cuit", ""))
-            telefono = str(row.get("telefono", ""))
-            abono = float(row.get("abono", 0))
+            nombre = row.get("nombre", "")
+            cuit = row.get("cuit", "")
+            telefono = row.get("telefono", "")
+            abono = row.get("abono", 0)
 
             c.execute("""
                 INSERT INTO clientes(nombre, cuit, telefono, abono)
@@ -249,6 +253,6 @@ def importar():
         <input type="file" name="archivo">
         <button>Subir</button>
     </form>
-    <br><a href='/panel'>⬅ Volver</a>
+    <br><a href='/panel'>← Volver</a>
     """
     # cambio para redeploy
