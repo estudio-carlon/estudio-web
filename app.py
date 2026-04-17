@@ -22,14 +22,18 @@ def init_db():
     conn = conectar()
     c = conn.cursor()
 
+    # USUARIOS
     c.execute("""
     CREATE TABLE IF NOT EXISTS usuarios(
         id SERIAL PRIMARY KEY,
         usuario TEXT,
-        clave TEXT
+        clave TEXT,
+        rol TEXT DEFAULT 'admin',
+        cliente_id INTEGER
     )
     """)
 
+    # CLIENTES
     c.execute("""
     CREATE TABLE IF NOT EXISTS clientes(
         id SERIAL PRIMARY KEY,
@@ -40,6 +44,7 @@ def init_db():
     )
     """)
 
+    # CUENTAS
     c.execute("""
     CREATE TABLE IF NOT EXISTS cuentas(
         id SERIAL PRIMARY KEY,
@@ -52,7 +57,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
 
 def actualizar_db():
     conn = conectar()
