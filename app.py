@@ -205,6 +205,8 @@ def cuenta(id):
     return html
 
 # ================= PDF =================
+from flask import send_file
+
 def generar_pdf(cliente_id, periodo, monto):
     archivo = f"recibo_{datetime.now().timestamp()}.pdf"
     c = canvas.Canvas(archivo)
@@ -222,6 +224,7 @@ def generar_pdf(cliente_id, periodo, monto):
 
     c.save()
 
+    return archivo
 # ================= DEUDAS =================
 @app.route("/deudas")
 def deudas():
