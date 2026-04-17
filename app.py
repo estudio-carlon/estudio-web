@@ -233,23 +233,22 @@ for d in datos:
     else:
         estado = f"🔴 DEBE ${saldo}"
 
-mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
-link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
+    mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
+    link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
 
-html += f"""
-{d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
-<a href='/recibo/{id}/{d[0]}'>📄 Recibo</a> |
-<a href='{link}' target='_blank'>📲 WhatsApp</a><br>
-"""
-
-    html += """
-    <form method='post'>
-    Periodo:<input name='periodo'>
-    Pago:<input name='pago'>
-    <button>Pagar</button>
-    </form>
+    html += f"""
+    {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
+    <a href='/recibo/{id}/{d[0]}'>🧾 Recibo</a> |
+    <a href='{link}' target='_blank'>📲 WhatsApp</a><br>
     """
 
+html += """
+<form method='post'>
+Periodo:<input name='periodo'>
+Pago:<input name='pago'>
+<button>Pagar</button>
+</form>
+"""
     return html
 
 # ================= PDF =================
