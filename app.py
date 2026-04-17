@@ -223,34 +223,35 @@ def cuenta(id):
 """, (id,))
     datos = c.fetchall()
 
-    html = "<h2>Cuenta</h2>"
+html = "<h2>Cuenta</h2>"
 
-for d in datos:
-    saldo = d[1] - d[2]
+    for d in datos:
+        saldo = d[1] - d[2]
 
-    if saldo <= 0:
-        estado = "✅ PAGADO"
-    else:
-        estado = f"🔴 DEBE ${saldo}"
+        if saldo <= 0:
+            estado = "✅ PAGADO"
+        else:
+            estado = f"🔴 DEBE ${saldo}"
 
-    mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
-    link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
+        mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
+        telefono = ""  # ⚠️ (esto lo agrego porque sino rompe)
+        link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
 
-    html += f"""
-    {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
-    <a href='/recibo/{id}/{d[0]}'>🧾 Recibo</a> |
-    <a href='{link}' target='_blank'>📲 WhatsApp</a><br>
+        html += f"""
+        {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
+        <a href='/recibo/{id}/{d[0]}'>🧾 Recibo</a> |
+        <a href='{link}' target='_blank'>📲 WhatsApp</a><br>
+        """
+
+    html += """
+    <form method='post'>
+    Periodo:<input name='periodo'>
+    Pago:<input name='pago'>
+    <button>Pagar</button>
+    </form>
     """
-return html
-html += """
-<form method='post'>
-Periodo:<input name='periodo'>
-Pago:<input name='pago'>
-<button>Pagar</button>
-</form>
-"""
 
-
+    return html
 # ================= PDF =================
 def generar_pdf(cliente_id, periodo, monto):
     conn = conectar()
