@@ -194,7 +194,7 @@ def cuenta(id):
         estado = "PAGADO" if saldo <= 0 else "ADEUDA"
 html += f"""
 {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
-<a href='/recibo/{id}/{d[0]}'>📄 Recibo</a><br>
+<a href='/recibo/{id}/{d[0]}'>📄 Descargar Recibo</a><br>
 """
 
     html += """
@@ -208,20 +208,45 @@ html += f"""
     return html
 
 # ================= PDF =================
-from flask import send_file
-
 def generar_pdf(cliente_id, periodo, monto):
+    conn = conectar()
+    c_db = conn.cursor()
+
+    # Traer nombre del cliente
+    c_db.execute("SELECT nombre FROM clientes WHERE id=%s", (cliente_id,))
+    cliente = c_db.fetchone()[0]
+
+    # Generar número de recibo automático
+    c_db.execute("SELECT COUNT(*) FROM cuentas")
+    nro = c_db.fetchone()[0]
+
     archivo = f"recibo_{cliente_id}_{periodo}.pdf"
 
     c = canvas.Canvas(archivo)
 
-    c.drawString(200,750,"RECIBO DE PAGO")
-    c.drawString(50,700,f"Cliente ID: {cliente_id}")
-    c.drawString(50,680,f"Periodo: {periodo}")
-    c.drawString(50,660,f"Monto: ${monto}")
-    c.drawString(50,640,f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+    # Título
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(180, 750, "RECIBO DE PAGO")
+
+    # Datos
+    c.setFont("Helvetica", 11)
+    c.drawString(50, 700, f"N° Recibo: {nro}")
+    c.drawString(50, 680, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+    c.drawString(50, 650, f"Cliente: {cliente}")
+    c.drawString(50, 630, f"Periodo: {periodo}")
+
+    # Monto grande
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, 590, f"Monto pagado: ${monto}")
+
+    # Firma
+    c.setFont("Helvetica", 10)
+    c.drawString(50, 520, "________")
+    c.drawString(50, 500, "Firma")
 
     c.save()
+
+    conn.close()
 
     return archivo
 # ================= DEUDAS =================
@@ -286,7 +311,9 @@ def importar():
     </form>
     <br><a href='/panel'>← Volver</a>
     """
-    @app.route("/recibo/<int:cliente_id>/<periodo>")
+   rom flask import send_file
+
+@app.route("/recibo/<int:cliente_id>/<periodo>")
 def ver_recibo(cliente_id, periodo):
     archivo = f"recibo_{cliente_id}_{periodo}.pdf"
     return send_file(archivo, as_attachment=True)
