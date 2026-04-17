@@ -291,7 +291,7 @@ def clientes():
     html += "</div></div>"
 
     return html
-    @app.route("/editar_cliente/<int:id>", methods=["GET","POST"])
+@app.route("/editar_cliente/<int:id>", methods=["GET","POST"])
 def editar_cliente(id):
     conn = conectar()
     c = conn.cursor()
@@ -308,10 +308,12 @@ def editar_cliente(id):
             id
         ))
         conn.commit()
+        conn.close()
         return redirect("/clientes")
 
     c.execute("SELECT * FROM clientes WHERE id=%s", (id,))
     d = c.fetchone()
+    conn.close()
 
     return f"""
     <h2>Editar Cliente</h2>
@@ -322,16 +324,17 @@ def editar_cliente(id):
         <button>Guardar</button>
     </form>
     """
-    @app.route("/borrar_cliente/<int:id>")
+
+@app.route("/borrar_cliente/<int:id>")
 def borrar_cliente(id):
     conn = conectar()
     c = conn.cursor()
 
     c.execute("DELETE FROM clientes WHERE id=%s", (id,))
     conn.commit()
+    conn.close()
 
     return redirect("/clientes")
-
 # ================= CUENTA =================
 @app.route("/cuenta/<int:id>", methods=["GET","POST"])
 def cuenta(id):
