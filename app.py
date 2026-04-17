@@ -84,8 +84,10 @@ def panel():
     return """
     <h1 style='color:#c9a86a'>Estudio Carlon</h1>
     <hr>
+
     <a href='/clientes'>👥 Clientes</a><br><br>
-    <a href='/deudas'>🔔 Deudas</a><br>
+    <a href='/deudas'>🔔 Deudas</a><br><br>
+    <a href='/importar'>📥 Importar Excel</a><br><br>
     """
 
 # ================= CREAR ADMIN =================
@@ -213,47 +215,39 @@ def deudas():
 
 import pandas as pd
 
-@app.route("/importar", methods=["GET","POST"])
+@app.route("/importar", methods=["GET", "POST"])
 def importar():
     if request.method == "POST":
-        file = request.files["file"]
-
-        df = pd.read_excel(file)
+        archivo = request.files["archivo"]
+        df = pd.read_excel(archivo)
 
         conn = conectar()
         c = conn.cursor()
 
         for _, row in df.iterrows():
-            nombre = str(row.get("nombre", "")).strip()
-            cuit = str(row.get("cuit", "")).strip()
-            telefono = str(row.get("telefono", "")).strip()
+            nombre = str(row.get("nombre", ""))
+            cuit = str(row.get("cuit", ""))
+            telefono = str(row.get("telefono", ""))
+            abono = float(row.get("abono", 0))
 
-            try:
-                abono = float(row.get("abono", 0))
-            except:
-                abono = 0
-
-            c.execute("SELECT id FROM clientes WHERE nombre=%s", (nombre,))
-            existe = c.fetchone()
-
-            if not existe:
-                c.execute("""
-                    INSERT INTO clientes(nombre,cuit,telefono,abono)
-                    VALUES(%s,%s,%s,%s)
-                """, (nombre, cuit, telefono, abono))
+            c.execute("""
+                INSERT INTO clientes(nombre, cuit, telefono, abono)
+                VALUES(%s,%s,%s,%s)
+            """, (nombre, cuit, telefono, abono))
 
         conn.commit()
         conn.close()
 
-        return "✅ Importación completada"
+        return """
+        ✅ Clientes importados <br><br>
+        <a href='/panel'>Volver</a>
+        """
 
     return """
-    <h2>📥 Importar Clientes</h2>
-
-    <a href='/clientes'>⬅ Volver</a><br><br>
-
+    <h2>📥 Importar Excel</h2>
     <form method="post" enctype="multipart/form-data">
-        <input type="file" name="file">
-        <button>Subir Excel</button>
+        <input type="file" name="archivo">
+        <button>Subir</button>
     </form>
+    <br><a href='/panel'>⬅ Volver</a>
     """
