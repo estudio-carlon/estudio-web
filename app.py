@@ -221,8 +221,6 @@ def importar():
     if request.method == "POST":
         archivo = request.files["archivo"]
 
-        import pandas as pd
-
         df = pd.read_excel(archivo)
 
         conn = conectar()
