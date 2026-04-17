@@ -356,7 +356,7 @@ def importar():
     </form>
     <br><a href='/panel'>← Volver</a>
     """
-@app.route("/recibo/<int:cliente_id>/<periodo>")
+@app.route("/recibo/<int:cliente_id>/<path:periodo>")
 def ver_recibo(cliente_id, periodo):
     archivo = f"recibo_{cliente_id}_{periodo}.pdf"
     return send_file(archivo, as_attachment=True)
