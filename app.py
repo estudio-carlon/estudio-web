@@ -229,10 +229,10 @@ def importar():
         c = conn.cursor()
 
         for _, row in df.iterrows():
-            nombre = row.get("nombre", "")
+            nombre = row.get("nombre y apellido", "")
             cuit = row.get("cuit", "")
             telefono = row.get("telefono", "")
-            abono = row.get("abono", 0)
+            abono = row.get("honorario", 0)
 
             c.execute("""
                 INSERT INTO clientes(nombre, cuit, telefono, abono)
