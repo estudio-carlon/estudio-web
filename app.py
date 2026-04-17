@@ -145,12 +145,54 @@ def login():
 @app.route("/panel")
 def panel():
     return """
-    <h1 style='color:#c9a86a'>Estudio Carlon</h1>
-    <hr>
+    <style>
+    body { margin:0; font-family:Arial; background:#f4f6f9; }
 
-    <a href='/clientes'>👥 Clientes</a><br><br>
-    <a href='/deudas'>🔔 Deudas</a><br><br>
-    <a href='/importar'>📥 Importar Excel</a><br><br>
+    .sidebar {
+        width:220px;
+        height:100vh;
+        position:fixed;
+        background:#1e1e2f;
+        color:white;
+        padding:20px;
+    }
+
+    .sidebar h2 { color:#c9a86a; }
+
+    .sidebar a {
+        display:block;
+        color:white;
+        text-decoration:none;
+        margin:15px 0;
+    }
+
+    .content {
+        margin-left:240px;
+        padding:20px;
+    }
+
+    .card {
+        background:white;
+        padding:20px;
+        border-radius:10px;
+        box-shadow:0 0 10px #ddd;
+        margin-bottom:20px;
+    }
+    </style>
+
+    <div class="sidebar">
+        <h2>📊 Estudio</h2>
+        <a href="/clientes">👥 Clientes</a>
+        <a href="/deudas">🔔 Deudas</a>
+        <a href="/importar">📥 Importar</a>
+    </div>
+
+    <div class="content">
+        <div class="card">
+            <h1>Bienvenida</h1>
+            <p>Sistema de gestión contable</p>
+        </div>
+    </div>
     """
 
 # ================= CREAR ADMIN =================
@@ -176,19 +218,119 @@ def clientes():
     c = conn.cursor()
 
     if request.method == "POST":
-        c.execute("INSERT INTO clientes(nombre,telefono,abono) VALUES(%s,%s,%s)",
-                  (request.form["nombre"], request.form["telefono"], request.form["abono"]))
+        c.execute("""
+            INSERT INTO clientes(nombre,telefono,abono)
+            VALUES(%s,%s,%s)
+        """, (
+            request.form["nombre"],
+            request.form["telefono"],
+            request.form["abono"]
+        ))
         conn.commit()
 
-    c.execute("SELECT * FROM clientes")
+    c.execute("SELECT * FROM clientes ORDER BY nombre")
     data = c.fetchall()
 
-    html = "<h2>Clientes</h2><form method='post'>Nombre:<input name='nombre'> Tel:<input name='telefono'> Abono:<input name='abono'><button>Agregar</button></form><br>"
+    html = """
+    <style>
+    body { font-family:Arial; background:#f4f6f9; }
+
+    .container { margin-left:240px; padding:20px; }
+
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; }
+
+    .card {
+        background:white;
+        padding:15px;
+        border-radius:10px;
+        box-shadow:0 0 5px #ccc;
+    }
+
+    .btn {
+        display:inline-block;
+        padding:5px 10px;
+        margin-top:5px;
+        text-decoration:none;
+        border-radius:5px;
+        font-size:12px;
+    }
+
+    .azul { background:#007bff; color:white; }
+    .amarillo { background:#ffc107; color:black; }
+    .rojo { background:#dc3545; color:white; }
+    </style>
+
+    <div class="container">
+    <h2>👥 Clientes</h2>
+
+    <div class="card">
+        <form method='post'>
+            <input name='nombre' placeholder='Nombre'>
+            <input name='telefono' placeholder='Teléfono'>
+            <input name='abono' placeholder='Abono'>
+            <button>Agregar</button>
+        </form>
+    </div>
+
+    <div class="grid">
+    """
 
     for d in data:
-        html += f"{d[1]} <a href='/cuenta/{d[0]}'>Cuenta</a><br>"
+        html += f"""
+        <div class="card">
+            <b>{d[1]}</b><br>
+            📞 {d[3]}<br>
+            💰 ${d[4]}<br>
+
+            <a class="btn azul" href="/cuenta/{d[0]}">Cuenta</a>
+            <a class="btn amarillo" href="/editar_cliente/{d[0]}">Editar</a>
+            <a class="btn rojo" href="/borrar_cliente/{d[0]}">Borrar</a>
+        </div>
+        """
+
+    html += "</div></div>"
 
     return html
+    @app.route("/editar_cliente/<int:id>", methods=["GET","POST"])
+def editar_cliente(id):
+    conn = conectar()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        c.execute("""
+            UPDATE clientes
+            SET nombre=%s, telefono=%s, abono=%s
+            WHERE id=%s
+        """, (
+            request.form["nombre"],
+            request.form["telefono"],
+            request.form["abono"],
+            id
+        ))
+        conn.commit()
+        return redirect("/clientes")
+
+    c.execute("SELECT * FROM clientes WHERE id=%s", (id,))
+    d = c.fetchone()
+
+    return f"""
+    <h2>Editar Cliente</h2>
+    <form method='post'>
+        Nombre:<br><input name='nombre' value='{d[1]}'><br>
+        Teléfono:<br><input name='telefono' value='{d[3]}'><br>
+        Abono:<br><input name='abono' value='{d[4]}'><br><br>
+        <button>Guardar</button>
+    </form>
+    """
+    @app.route("/borrar_cliente/<int:id>")
+def borrar_cliente(id):
+    conn = conectar()
+    c = conn.cursor()
+
+    c.execute("DELETE FROM clientes WHERE id=%s", (id,))
+    conn.commit()
+
+    return redirect("/clientes")
 
 # ================= CUENTA =================
 @app.route("/cuenta/<int:id>", methods=["GET","POST"])
@@ -223,33 +365,45 @@ def cuenta(id):
     """, (id,))
     datos = c.fetchall()
 
-    html = "<h2>Cuenta</h2>"
+    html = """
+<style>
+body { font-family:Arial; background:#f4f6f9; }
+.container { margin-left:240px; padding:20px; }
+.card { background:white; padding:15px; margin-bottom:10px; border-radius:10px; }
+.pagado { color:green; }
+.debe { color:red; }
+</style>
 
-    for d in datos:
-        saldo = d[1] - d[2]
+<div class="container">
+<h2>Cuenta</h2>
+"""
 
-        if saldo <= 0:
-            estado = "✅ PAGADO"
-        else:
-            estado = f"🔴 DEBE ${saldo}"
+for d in datos:
+    saldo = d[1] - d[2]
 
-        telefono = ""  # después lo mejoramos
-        mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
-        link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
+    if saldo <= 0:
+        estado = f"<span class='pagado'>PAGADO</span>"
+    else:
+        estado = f"<span class='debe'>DEBE ${saldo}</span>"
 
-        html += f"""
-        {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
-        <a href='/recibo/{id}/{d[0]}'>🧾 Recibo</a> |
-        <a href='{link}' target='_blank'>📲 WhatsApp</a><br>
-        """
-
-    html += """
-    <form method='post'>
-    Periodo:<input name='periodo'>
-    Pago:<input name='pago'>
-    <button>Pagar</button>
-    </form>
+    html += f"""
+    <div class="card">
+        <b>{d[0]}</b> | {estado}<br>
+        Debe: {d[1]} | Haber: {d[2]}<br>
+        <a href='/recibo/{id}/{d[0]}'>🧾 Recibo</a>
+    </div>
     """
+
+html += """
+<div class="card">
+<form method='post'>
+Periodo:<input name='periodo'>
+Pago:<input name='pago'>
+<button>Pagar</button>
+</form>
+</div>
+</div>
+"""
 
     return html
 # ================= PDF =================
