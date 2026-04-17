@@ -348,35 +348,67 @@ def generar_pdf(cliente_id, periodo, monto):
 
     conn = conectar()
     c_db = conn.cursor()
-    c_db.execute("SELECT nombre FROM clientes WHERE id=%s", (cliente_id,))
-    cliente = c_db.fetchone()[0]
+    c_db.execute("SELECT nombre, cuit FROM clientes WHERE id=%s", (cliente_id,))
+    cliente = c_db.fetchone()
 
+    nombre = cliente[0]
+    cuit = cliente[1] if cliente[1] else "-"
+
+    # ===== LOGO =====
     if os.path.exists("logo.png"):
         logo = ImageReader("logo.png")
-        c.drawImage(logo, 40, 730, width=120, height=60)
+        c.drawImage(logo, 40, 750, width=120, height=60)
 
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(200, 750, "RECIBO")
+    # ===== TITULO =====
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(220, 770, "RECIBO")
+
+    # ===== FECHA =====
+    c.setFont("Helvetica", 10)
+    c.drawString(400, 770, datetime.now().strftime("%d/%m/%Y"))
+
+    # ===== DATOS EMPRESA =====
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(40, 720, "Estudio Contable Carlon")
 
     c.setFont("Helvetica", 10)
-    c.drawString(400, 750, datetime.now().strftime("%d/%m/%Y"))
+    c.drawString(40, 705, "Servicios Contables e Impositivos")
+    c.drawString(40, 690, "CUIT: XX-XXXXXXXX-X")
+    c.drawString(40, 675, "Villa Unión - La Rioja")
 
+    # ===== CLIENTE =====
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(40, 690, f"Cliente: {cliente}")
+    c.drawString(40, 640, f"Cliente: {nombre}")
 
-    c.drawString(40, 660, f"Periodo: {periodo}")
+    c.setFont("Helvetica", 10)
+    c.drawString(40, 625, f"CUIT: {cuit}")
+    c.drawString(40, 610, f"Periodo: {periodo}")
 
-    c.rect(40, 600, 500, 60)
+    # ===== CAJA TOTAL =====
+    c.rect(40, 550, 500, 60)
 
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, 630, f"TOTAL: $ {monto}")
+    c.drawString(50, 585, "TOTAL PAGADO:")
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(300, 580, f"$ {round(monto, 2)}")
+
+    # ===== TEXTO LEGAL =====
+    c.setFont("Helvetica", 9)
+    c.drawString(40, 520, "Recibí conforme el importe indicado en concepto de honorarios profesionales.")
+
+    # ===== FIRMA =====
+    c.line(40, 480, 200, 480)
+    c.drawString(40, 465, "Firma")
+
+    c.line(300, 480, 500, 480)
+    c.drawString(300, 465, "Aclaración")
 
     c.save()
     buffer.seek(0)
     conn.close()
 
     return buffer
-
 
 # ================= RECIBO =================
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
