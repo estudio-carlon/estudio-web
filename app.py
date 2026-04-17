@@ -233,63 +233,83 @@ def clientes():
 
     html = """
     <style>
-    body { font-family:Arial; background:#f4f6f9; }
+    body { font-family: Arial; background:#f4f6f9; margin:0; }
+    .container { margin-left:220px; padding:20px; }
+    h2 { margin-bottom:20px; }
 
-    .container { margin-left:240px; padding:20px; }
+    .form {
+        background:white;
+        padding:15px;
+        border-radius:10px;
+        margin-bottom:20px;
+        box-shadow:0 2px 5px rgba(0,0,0,0.1);
+    }
 
-    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; }
+    input {
+        margin:5px;
+        padding:8px;
+        border-radius:5px;
+        border:1px solid #ccc;
+    }
+
+    button {
+        padding:8px 12px;
+        border:none;
+        border-radius:5px;
+        background:#28a745;
+        color:white;
+        cursor:pointer;
+    }
 
     .card {
         background:white;
         padding:15px;
+        margin-bottom:10px;
         border-radius:10px;
-        box-shadow:0 0 5px #ccc;
+        box-shadow:0 2px 5px rgba(0,0,0,0.1);
     }
 
     .btn {
-        display:inline-block;
         padding:5px 10px;
-        margin-top:5px;
-        text-decoration:none;
         border-radius:5px;
+        text-decoration:none;
         font-size:12px;
+        margin-right:5px;
     }
 
-    .azul { background:#007bff; color:white; }
-    .amarillo { background:#ffc107; color:black; }
-    .rojo { background:#dc3545; color:white; }
+    .btn-cuenta { background:#007bff; color:white; }
+    .btn-editar { background:#ffc107; color:black; }
+    .btn-borrar { background:#dc3545; color:white; }
     </style>
 
     <div class="container">
     <h2>👥 Clientes</h2>
 
-    <div class="card">
+    <div class="form">
         <form method='post'>
             <input name='nombre' placeholder='Nombre'>
             <input name='telefono' placeholder='Teléfono'>
             <input name='abono' placeholder='Abono'>
-            <button>Agregar</button>
+            <button>➕ Agregar</button>
         </form>
     </div>
-
-    <div class="grid">
     """
 
     for d in data:
         html += f"""
         <div class="card">
             <b>{d[1]}</b><br>
-            📞 {d[3]}<br>
-            💰 ${d[4]}<br>
+            📞 {d[3]} | 💰 ${d[4]}<br><br>
 
-            <a class="btn azul" href="/cuenta/{d[0]}">Cuenta</a>
-            <a class="btn amarillo" href="/editar_cliente/{d[0]}">Editar</a>
-            <a class="btn rojo" href="/borrar_cliente/{d[0]}">Borrar</a>
+            <a class="btn btn-cuenta" href="/cuenta/{d[0]}">📊 Cuenta</a>
+            <a class="btn btn-editar" href="/editar_cliente/{d[0]}">✏️ Editar</a>
+            <a class="btn btn-borrar" href="/borrar_cliente/{d[0]}" onclick="return confirm('¿Seguro que querés borrar este cliente?')">🗑 Borrar</a>
         </div>
         """
 
-    html += "</div></div>"
+    html += "</div>"
 
+    conn.close()
     return html
 @app.route("/editar_cliente/<int:id>", methods=["GET","POST"])
 def editar_cliente(id):
@@ -408,7 +428,7 @@ Pago:<input name='pago'>
 </div>
 """
 
-    return html
+return html
 # ================= PDF =================
 def generar_pdf(cliente_id, periodo, monto):
     conn = conectar()
