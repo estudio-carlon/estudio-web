@@ -321,14 +321,14 @@ def cuenta(id):
         link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
 
         html += f"""
-        <div>
-        {d[0]} | {estado}<br>
-        <a href='/recibo/{id}/{d[0]}' target='_blank'>Ver</a> |
-        <a href='/recibo/{id}/{d[0]}?download=1'>Descargar</a> |
-        <a href='{link}' target='_blank'>WhatsApp</a>
-        </div><br>
-        """
-
+<div>
+{d[0]} | {estado}<br>
+<a href='/recibo/{id}/{d[0].replace("/", "-")}' target='_blank'>Ver</a> |
+<a href='/recibo/{id}/{d[0].replace("/", "-")}?download=1'>Descargar</a> |
+<a href='{link}' target='_blank'>WhatsApp</a>
+</div><br>
+"""
+ 
     html += """
     <form method='post'>
     Periodo:<input name='periodo'>
@@ -379,8 +379,9 @@ def generar_pdf(cliente_id, periodo, monto):
 
 
 # ================= RECIBO =================
-@app.route("/recibo/<int:cliente_id>/<periodo>")
+@app.route("/recibo/<int:cliente_id>/<path:periodo>")
 def ver_recibo(cliente_id, periodo):
+    periodo = periodo.replace("-", "/")
     conn = conectar()
     c = conn.cursor()
 
