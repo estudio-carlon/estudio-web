@@ -386,7 +386,7 @@ def ver_recibo(cliente_id, periodo):
     c = conn.cursor()
 
     c.execute("""
-        SELECT haber FROM cuentas
+        SELECT debe, haber FROM cuentas
         WHERE cliente_id=%s AND periodo=%s
     """, (cliente_id, periodo))
 
@@ -396,7 +396,12 @@ def ver_recibo(cliente_id, periodo):
     if not data:
         return "No hay datos"
 
-    pdf = generar_pdf(cliente_id, periodo, data[0])
+    debe = data[0]
+haber = data[1]
+
+monto = haber if haber > 0 else debe
+
+pdf = generar_pdf(cliente_id, periodo, monto)
 
     download = request.args.get("download")
 
