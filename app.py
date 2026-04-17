@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, session
+from flask import Flask, request, redirect, session, send_file
 import psycopg2
 import os
 import pandas as pd
@@ -356,8 +356,6 @@ def importar():
     </form>
     <br><a href='/panel'>← Volver</a>
     """
-from flask import Flask, request, redirect, session, send_file
-
 @app.route("/recibo/<int:cliente_id>/<periodo>")
 def ver_recibo(cliente_id, periodo):
     archivo = f"recibo_{cliente_id}_{periodo}.pdf"
