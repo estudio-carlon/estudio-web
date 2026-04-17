@@ -231,9 +231,15 @@ def cuenta(id):
     estado = "✅ PAGADO"
 else:
     estado = f"🔴 DEBE ${saldo}"
+saldo = d[1] - d[2]
+
+mensaje = f"Hola, te recordamos que tenés pendiente el periodo {d[0]} por un total de ${saldo}"
+link = f"https://wa.me/{telefono}?text={mensaje.replace(' ', '%20')}"
+
 html += f"""
 {d[0]} | {estado} | Debe:{d[1]} Haber:{d[2]}
-<a href='/recibo/{id}/{d[0]}'>📄 Descargar Recibo</a><br>
+<a href='/recibo/{id}/{d[0]}'>📄 Recibo</a> |
+<a href='{link}' target='_blank'>📲 WhatsApp</a><br>
 """
 
     html += """
