@@ -415,16 +415,16 @@ def generar_pdf(cliente_id, periodo, monto):
     c.line(width - 200, height - 450, width - 40, height - 450)
     c.drawString(width - 200, height - 465, "Aclaración")
 # ===== DATOS BANCARIOS =====
-c.setFont("Helvetica", 9)
-c.drawString(40, 120, "Datos para transferencia:")
-c.drawString(40, 105, "Titular: Alexis Natasha Carlon")
-c.drawString(40, 90, "CUIL: 27-35045505-7")
-c.drawString(40, 75, "Banco: Banco Nación")
-c.drawString(40, 60, "Cuenta: CA $ 28324201345252")
-c.drawString(40, 45, "CBU: 0110420630042013452529")
-c.drawString(40, 30, "Alias: ESTUDIO.CONTA.CARLON")
-c.setFont("Helvetica-Bold", 10)
-c.drawString(width - 160, 160, "Escaneá para pagar")
+    c.setFont("Helvetica", 9)
+    c.drawString(40, 120, "Datos para transferencia:")
+    c.drawString(40, 105, "Titular: Alexis Natasha Carlon")
+    c.drawString(40, 90, "CUIL: 27-35045505-7")
+    c.drawString(40, 75, "Banco: Banco Nación")
+    c.drawString(40, 60, "Cuenta: CA $ 28324201345252")
+    c.drawString(40, 45, "CBU: 0110420630042013452529")
+    c.drawString(40, 30, "Alias: ESTUDIO.CONTA.CARLON")
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(width - 160, 160, "Escaneá para pagar")
 
 # ===== QR DE PAGO =====
 qr_data = f"""
@@ -449,12 +449,12 @@ qr_buffer.seek(0)
 qr_image = ImageReader(qr_buffer)
 
 # Posición del QR
-c.drawImage(qr_image, width - 150, 50, width=100, height=100)
-c.save()
-buffer.seek(0)
-conn.close()
+    c.drawImage(qr_image, width - 150, 50, width=100, height=100)
+    c.save()
+    buffer.seek(0)
+    conn.close()
 
-return buffer
+    return buffer
 
 # ================= LINK =================
 def crear_link_pago(monto, descripcion):
