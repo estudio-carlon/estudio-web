@@ -55,7 +55,19 @@ def init_db():
     conn.close()
 
 init_db()
+def actualizar_db():
+    conn = conectar()
+    c = conn.cursor()
 
+    try:
+        c.execute("ALTER TABLE clientes ADD COLUMN cuit TEXT")
+    except:
+        pass
+
+    conn.commit()
+    conn.close()
+
+actualizar_db()
 # ================= LOGIN =================
 @app.route("/", methods=["GET","POST"])
 def login():
