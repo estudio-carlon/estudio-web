@@ -249,7 +249,6 @@ Pago:<input name='pago'>
 <button>Pagar</button>
 </form>
 """
-
 return html
 
 # ================= PDF =================
