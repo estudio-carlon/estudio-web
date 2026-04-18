@@ -192,11 +192,13 @@ def clientes():
 
     if request.method == "POST":
         c.execute("""
-            INSERT INTO clientes(nombre,telefono,abono)
-            VALUES(%s,%s,%s)
+            INSERT INTO clientes(nombre,cuit,telefono,email,abono)
+            VALUES(%s,%s,%s,%s,%s)
         """, (
             request.form["nombre"],
+            request.form["cuit"],
             request.form["telefono"],
+            request.form["email"],
             request.form["abono"]
         ))
         conn.commit()
@@ -232,8 +234,10 @@ def clientes():
         html += f"""
         <div class="card">
             <b>{d[1]}</b><br>
-            📞 {d[3]} | 💰 ${d[4]}<br><br>
-
+            📄 CUIT: {d[2]}<br>
+            📞 {d[3]}<br>
+            📧 {d[5] or ""}<br>
+            💰 Honorarios: ${d[4]}
             <a class="btn azul" href="/cuenta/{d[0]}">Cuenta</a>
             <a class="btn amarillo" href="/editar_cliente/{d[0]}">Editar</a>
             <a class="btn rojo" href="/borrar_cliente/{d[0]}" onclick="return confirm('¿Seguro?')">Borrar</a>
@@ -254,11 +258,13 @@ def editar_cliente(id):
     if request.method == "POST":
         c.execute("""
             UPDATE clientes
-            SET nombre=%s, telefono=%s, abono=%s
+            SET nombre=%s, cuit=%s, telefono=%s, email=%s, abono=%s
             WHERE id=%s
         """, (
             request.form["nombre"],
+            request.form["cuit"],
             request.form["telefono"],
+            request.form["email"],
             request.form["abono"],
             id
         ))
@@ -274,12 +280,13 @@ def editar_cliente(id):
     <h2>Editar Cliente</h2>
     <form method='post'>
         Nombre:<br><input name='nombre' value='{d[1]}'><br>
-        Teléfono:<br><input name='telefono' value='{d[3]}'><br>
-        Abono:<br><input name='abono' value='{d[4]}'><br><br>
+        CUIT:<br><input name='cuit' value='{d[2] or ""}'><br>
+        Teléfono:<br><input name='telefono' value='{d[3] or ""}'><br>
+        Email:<br><input name='email' value='{d[5] or ""}'><br>
+        Honorarios:<br><input name='abono' value='{d[4] or 0}'><br><br>
         <button>Guardar</button>
     </form>
     """
-
 
 # ================= BORRAR =================
 @app.route("/borrar_cliente/<int:id>")
