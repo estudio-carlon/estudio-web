@@ -266,8 +266,8 @@ def clientes():
             <b>{d[1]}</b><br>
             📄 CUIT: {d[2]}<br>
             📞 {d[3]}<br>
-            📧 {d[5] or ""}<br>
             💰 Honorarios: ${d[4]}
+            📧 {d[5] if len(d) > 5 else ""}<br>
             <a class="btn azul" href="/cuenta/{d[0]}">Cuenta</a>
             <a class="btn amarillo" href="/editar_cliente/{d[0]}">Editar</a>
             <a class="btn rojo" href="/borrar_cliente/{d[0]}" onclick="return confirm('¿Seguro?')">Borrar</a>
