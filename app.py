@@ -414,7 +414,7 @@ def generar_pdf(cliente_id, periodo, monto):
 
     c.line(width - 200, height - 450, width - 40, height - 450)
     c.drawString(width - 200, height - 465, "Aclaración")
-# ===== DATOS BANCARIOS =====
+    # ===== DATOS BANCARIOS =====
     c.setFont("Helvetica", 9)
     c.drawString(40, 120, "Datos para transferencia:")
     c.drawString(40, 105, "Titular: Alexis Natasha Carlon")
@@ -426,33 +426,33 @@ def generar_pdf(cliente_id, periodo, monto):
     c.setFont("Helvetica-Bold", 10)
     c.drawString(width - 160, 160, "Escaneá para pagar")
 
-# ===== QR DE PAGO =====
-qr_data = f"""
-Transferencia bancaria
-Titular: Alexis Natasha Carlon
-CUIL: 27-35045505-7
-CBU: 0110420630042013452529
-Alias: ESTUDIO.CONTA.CARLON
-Banco: Nación
+    # ===== QR DE PAGO =====
+    qr_data = f"""
+    Transferencia bancaria
+    Titular: Alexis Natasha Carlon
+    CUIL: 27-35045505-7
+    CBU: 0110420630042013452529
+    Alias: ESTUDIO.CONTA.CARLON
+    Banco: Nación
 
-Monto: ${monto}
-Cliente: {cliente}
-Periodo: {periodo}
-"""
+    Monto: ${monto}
+    Cliente: {cliente}
+    Periodo: {periodo}
+    """
 
-qr = qrcode.make(qr_data)
+    qr = qrcode.make(qr_data)
 
-qr_buffer = BytesIO()
-qr.save(qr_buffer)
-qr_buffer.seek(0)
+    qr_buffer = BytesIO()
+    qr.save(qr_buffer)
+    qr_buffer.seek(0)
 
-qr_image = ImageReader(qr_buffer)
+    qr_image = ImageReader(qr_buffer)
 
-# Posición del QR
-c.drawImage(qr_image, width - 150, 50, width=100, height=100)
-c.save()
-buffer.seek(0)
-conn.close()
+    # Posición del QR
+    c.drawImage(qr_image, width - 150, 50, width=100, height=100)
+    c.save()
+    buffer.seek(0)
+    conn.close()
 
     return buffer
 
