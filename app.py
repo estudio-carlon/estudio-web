@@ -229,7 +229,11 @@ def clientes():
         ))
         conn.commit()
 
-    c.execute("SELECT * FROM clientes ORDER BY nombre")
+    c.execute("""
+    SELECT id, nombre, cuit, telefono, abono, email
+    FROM clientes
+    ORDER BY nombre
+    """)
     data = c.fetchall()
 
     html = """
