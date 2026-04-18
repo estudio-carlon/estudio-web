@@ -141,6 +141,17 @@ def corregir_cuit_en_abono():
                 WHERE id=%s
             """, (valor, cliente_id))
 
+def columna_existe(nombre_col):
+    conn = conectar()
+    c = conn.cursor()
+    c.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='clientes'
+    """)
+    columnas = [x[0] for x in c.fetchall()]
+    conn.close()
+    return nombre_col in columnas
     conn.commit()
     conn.close()
 
@@ -217,6 +228,10 @@ def clientes():
     c = conn.cursor()
 
     if request.method == "POST":
+    if columna_existe("email"):
+    SELECT con email
+else:
+    SELECT sin email
         c.execute("""
             INSERT INTO clientes(nombre,cuit,telefono,email,abono)
             VALUES(%s,%s,%s,%s,%s)
