@@ -116,13 +116,37 @@ def generar_deuda_mensual():
 
     conn.commit()
     conn.close()
+def corregir_cuit_en_abono():
+    conn = conectar()
+    c = conn.cursor()
 
+    c.execute("SELECT id, abono FROM clientes")
+    clientes = c.fetchall()
+
+    for cliente_id, abono in clientes:
+        if not abono:
+            continue
+
+        valor = str(abono).replace(".", "").strip()
+
+        # Si parece un CUIT (11 dígitos)
+        if valor.isdigit() and len(valor) >= 10:
+            print(f"Corrigiendo cliente {cliente_id} → CUIT {valor}")
+
+            c.execute("""
+                UPDATE clientes
+                SET cuit=%s, abono=0
+                WHERE id=%s
+            """, (valor, cliente_id))
+
+    conn.commit()
+    conn.close()
 
 init_db()
 actualizar_db()
 limpiar_duplicados()
 generar_deuda_mensual()
-
+corregir_cuit_en_abono()
 
 # ================= LOGIN =================
 @app.route("/", methods=["GET", "POST"])
