@@ -63,10 +63,17 @@ def init_db():
 def actualizar_db():
     conn = conectar()
     c = conn.cursor()
+
     try:
         c.execute("ALTER TABLE clientes ADD COLUMN cuit TEXT")
     except:
         pass
+
+    try:
+        c.execute("ALTER TABLE clientes ADD COLUMN email TEXT")
+    except:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -212,11 +219,13 @@ def clientes():
     <h2>👥 Clientes</h2>
 
     <form method='post'>
-        <input name='nombre' placeholder='Nombre'>
-        <input name='telefono' placeholder='Teléfono'>
-        <input name='abono' placeholder='Abono'>
-        <button>Agregar</button>
-    </form>
+    <input name='nombre' placeholder='Nombre'><br>
+    <input name='cuit' placeholder='CUIT'><br>
+    <input name='telefono' placeholder='Teléfono'><br>
+    <input name='email' placeholder='Email'><br>
+    <input name='abono' placeholder='Honorarios'><br>
+    <button>Agregar</button>
+</form>
     """
 
     for d in data:
