@@ -1,4 +1,3 @@
-app.config["PROPAGATE_EXCEPTIONS"] = True
 from flask import Flask, request, redirect, session, send_file
 import psycopg2
 import os
@@ -13,6 +12,9 @@ from io import BytesIO
 
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
+app.secret_key = "super_secret_key"
+
+app.config["PROPAGATE_EXCEPTIONS"] = True
 DB_URL = os.getenv("DB_URL")
 
 
