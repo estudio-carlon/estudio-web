@@ -5,3 +5,5 @@ pandas
 openpyxl
 psycopg2-binary
 qrcode
+requests
+werkzeug
