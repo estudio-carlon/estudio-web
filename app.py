@@ -296,7 +296,7 @@ def editar_cliente(id):
         conn.close()
         return redirect("/clientes")
 
-    c.execute("SELECT * FROM clientes WHERE id=%s", (id,))
+    c.execute("SELECT id, nombre, cuit, telefono, abono FROM clientes WHERE id=%s", (id,))
     d = c.fetchone()
     conn.close()
 
@@ -306,12 +306,11 @@ def editar_cliente(id):
         Nombre:<br><input name='nombre' value='{d[1]}'><br>
         CUIT:<br><input name='cuit' value='{d[2] or ""}'><br>
         Teléfono:<br><input name='telefono' value='{d[3] or ""}'><br>
-        Email:<br><input name='email' value='{d[5] or ""}'><br>
-        Honorarios:<br><input name='abono' value='{d[4] or 0}'><br><br>
+        Abono:<br><input name='abono' value='{d[4] or 0}'><br><br>
         <button>Guardar</button>
     </form>
     """
-
+    
 # ================= BORRAR =================
 @app.route("/borrar_cliente/<int:id>")
 def borrar_cliente(id):
