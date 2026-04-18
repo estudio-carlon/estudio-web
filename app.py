@@ -1,3 +1,4 @@
+app.config["PROPAGATE_EXCEPTIONS"] = True
 from flask import Flask, request, redirect, session, send_file
 import psycopg2
 import os
@@ -285,11 +286,11 @@ def editar_cliente(id):
             SET nombre=%s, cuit=%s, telefono=%s, email=%s, abono=%s
             WHERE id=%s
         """, (
-            request.form["nombre"],
-            request.form["cuit"],
-            request.form["telefono"],
-            request.form["email"],
-            request.form["abono"],
+            request.form.get("nombre"),
+            request.form.get("cuit",""),
+            request.form.get("telefono"),
+            request.form.get("email"),
+            request.form.get("abono"),
             id
         ))
         conn.commit()
