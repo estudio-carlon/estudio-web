@@ -230,7 +230,7 @@ def clientes():
         conn.commit()
 
     c.execute("""
-    SELECT id, nombre, cuit, telefono, abono, email
+    SELECT id, nombre, cuit, telefono, abono
     FROM clientes
     ORDER BY nombre
     """)
