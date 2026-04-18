@@ -414,6 +414,7 @@ def generar_pdf(cliente_id, periodo, monto):
 
     c.line(width - 200, height - 450, width - 40, height - 450)
     c.drawString(width - 200, height - 465, "Aclaración")
+
     # ===== DATOS BANCARIOS =====
     c.setFont("Helvetica", 9)
     c.drawString(40, 120, "Datos para transferencia:")
