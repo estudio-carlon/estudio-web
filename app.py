@@ -227,69 +227,77 @@ def clientes():
     conn = conectar()
     c = conn.cursor()
 
+    # ===== GUARDAR CLIENTE =====
     if request.method == "POST":
-    if columna_existe("email"):
-    SELECT con email
-else:
-    SELECT sin email
-        c.execute("""
-            INSERT INTO clientes(nombre,cuit,telefono,email,abono)
-            VALUES(%s,%s,%s,%s,%s)
-        """, (
-            request.form["nombre"],
-            request.form["cuit"],
-            request.form["telefono"],
-            request.form["email"],
-            request.form["abono"]
-        ))
+        if columna_existe("email"):
+            c.execute("""
+                INSERT INTO clientes(nombre, cuit, telefono, email, abono)
+                VALUES(%s,%s,%s,%s,%s)
+            """, (
+                request.form.get("nombre"),
+                request.form.get("cuit"),
+                request.form.get("telefono"),
+                request.form.get("email"),
+                request.form.get("abono")
+            ))
+        else:
+            c.execute("""
+                INSERT INTO clientes(nombre, cuit, telefono, abono)
+                VALUES(%s,%s,%s,%s)
+            """, (
+                request.form.get("nombre"),
+                request.form.get("cuit"),
+                request.form.get("telefono"),
+                request.form.get("abono")
+            ))
         conn.commit()
 
-    c.execute("""
-    SELECT id, nombre, cuit, telefono, abono
-    FROM clientes
-    ORDER BY nombre
-    """)
+    # ===== CONSULTA =====
+    if columna_existe("email"):
+        c.execute("""
+            SELECT id, nombre, cuit, telefono, abono, email
+            FROM clientes
+            ORDER BY nombre
+        """)
+    else:
+        c.execute("""
+            SELECT id, nombre, cuit, telefono, abono
+            FROM clientes
+            ORDER BY nombre
+        """)
+
     data = c.fetchall()
 
+    # ===== HTML =====
     html = """
-    <style>
-    body { font-family:Arial; background:#f4f6f9; }
-    .container { padding:20px; }
-    .card { background:white; padding:15px; margin-bottom:10px; border-radius:10px; }
-    .btn { padding:5px 10px; border-radius:5px; text-decoration:none; font-size:12px; margin-right:5px; }
-    .azul { background:#007bff; color:white; }
-    .amarillo { background:#ffc107; color:black; }
-    .rojo { background:#dc3545; color:white; }
-    </style>
-
-    <div class="container">
-    <h2>👥 Clientes</h2>
+    <h2>Clientes</h2>
 
     <form method='post'>
-    <input name='nombre' placeholder='Nombre'><br>
-    <input name='cuit' placeholder='CUIT'><br>
-    <input name='telefono' placeholder='Teléfono'><br>
-    <input name='email' placeholder='Email'><br>
-    <input name='abono' placeholder='Honorarios'><br>
-    <button>Agregar</button>
-</form>
+        <input name='nombre' placeholder='Nombre'><br>
+        <input name='cuit' placeholder='CUIT'><br>
+        <input name='telefono' placeholder='Teléfono'><br>
+        <input name='email' placeholder='Email'><br>
+        <input name='abono' placeholder='Honorarios'><br>
+        <button>Guardar</button>
+    </form>
+    <br>
     """
 
     for d in data:
         html += f"""
-        <div class="card">
+        <div style="border:1px solid #ccc; padding:10px; margin:10px;">
             <b>{d[1]}</b><br>
-            📄 CUIT: {d[2]}<br>
-            📞 {d[3]}<br>
-            💰 Honorarios: ${d[4]}
-            📧 {d[5] if len(d) > 5 else ""}<br>
-            <a class="btn azul" href="/cuenta/{d[0]}">Cuenta</a>
-            <a class="btn amarillo" href="/editar_cliente/{d[0]}">Editar</a>
-            <a class="btn rojo" href="/borrar_cliente/{d[0]}" onclick="return confirm('¿Seguro?')">Borrar</a>
+            CUIT: {d[2]}<br>
+            Tel: {d[3]}<br>
+            Email: {d[5] if len(d) > 5 else ""}<br>
+            Honorarios: ${d[4]}<br><br>
+
+            <a href="/cuenta/{d[0]}">Cuenta</a> |
+            <a href="/editar_cliente/{d[0]}">Editar</a> |
+            <a href="/borrar_cliente/{d[0]}">Borrar</a>
         </div>
         """
 
-    html += "</div>"
     conn.close()
     return html
 
