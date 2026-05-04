@@ -271,28 +271,111 @@ def logout():
 def panel():
     if session.get("rol")!="admin": return redirect("/clientes")
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT COALESCE(SUM(debe),0) FROM cuentas");td=c.fetchone()[0]
-    c.execute("SELECT COALESCE(SUM(haber),0) FROM cuentas");th=c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM clientes");nc=c.fetchone()[0]
-    c.execute("SELECT COUNT(DISTINCT cliente_id) FROM cuentas WHERE (debe-haber)>0");nd=c.fetchone()[0]
-    c.execute("SELECT COALESCE(SUM(monto),0) FROM gastos");tg=c.fetchone()[0]
-    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Natasha%'");cobro_nat=c.fetchone()[0]
-    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Maira%'");cobro_mai=c.fetchone()[0]
-    c.execute("SELECT cl.nombre,SUM(cu.debe-cu.haber) d FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id GROUP BY cl.nombre HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC LIMIT 8")
-    top=c.fetchall()
-    c.execute("SELECT periodo,SUM(haber) FROM cuentas WHERE haber>0 GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC LIMIT 8")
-    cobros_mes=list(reversed(c.fetchall()))
-    c.execute("SELECT fecha,usuario,accion,detalle,cliente_nombre FROM auditoria ORDER BY id DESC LIMIT 10")
-    actividad=c.fetchall()
+
+    # ── Totales generales ──
+    c.execute("SELECT COALESCE(SUM(debe),0) FROM cuentas");         td  = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(haber),0) FROM cuentas");        th  = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM clientes");                      nc  = c.fetchone()[0]
+    c.execute("SELECT COUNT(DISTINCT cliente_id) FROM cuentas WHERE (debe-haber)>0"); nd = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(monto),0) FROM gastos");         tg  = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Natasha%'"); cobro_nat = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Maira%'");   cobro_mai = c.fetchone()[0]
+
+    # ── Alertas ──
+    anio_actual = datetime.now().strftime("%Y")
+    # Clientes con 2+ meses sin pagar
+    c.execute("""SELECT COUNT(DISTINCT cliente_id) FROM cuentas
+                 WHERE (debe-haber)>0
+                 AND SUBSTRING(periodo,4,4)=%s""", (anio_actual,))
+    n_morosos = c.fetchone()[0]
+    # Clientes sin honorario
+    c.execute("SELECT COUNT(*) FROM clientes WHERE abono IS NULL OR abono=0")
+    n_sin_abono = c.fetchone()[0]
+    # Cierres de caja pendientes hoy
+    hoy = datetime.now().strftime("%d/%m/%Y")
+    c.execute("SELECT COUNT(DISTINCT usuario) FROM pagos WHERE fecha LIKE %s", (f"%{hoy}%",))
+    sec_cobraron = c.fetchone()[0]
+    c.execute("SELECT COUNT(DISTINCT usuario) FROM cierres_caja WHERE fecha=%s AND cerrado=TRUE", (hoy,))
+    sec_cerraron = c.fetchone()[0]
+    cajas_pendientes = max(0, sec_cobraron - sec_cerraron)
+
+    # ── Gráfico 1: Ingresos vs Gastos últimos 8 meses ──
+    c.execute("""SELECT periodo, COALESCE(SUM(haber),0) FROM cuentas
+                 GROUP BY periodo
+                 ORDER BY SUBSTRING(periodo,4,4) DESC, SUBSTRING(periodo,1,2) DESC LIMIT 8""")
+    raw_ing = list(reversed(c.fetchall()))
+    periodos   = [r[0] for r in raw_ing]
+    ingresos_m = [float(r[1]) for r in raw_ing]
+
+    gastos_m = []
+    for per in periodos:
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM gastos WHERE fecha LIKE %s", (f"%{per.split('/')[1]}%",))
+        gastos_m.append(float(c.fetchone()[0]))
+
+    # ── Gráfico 2: Medios de pago ──
+    c.execute("SELECT medio, COALESCE(SUM(monto),0) FROM pagos GROUP BY medio ORDER BY SUM(monto) DESC")
+    medios_raw = c.fetchall()
+    total_med = sum(float(r[1]) for r in medios_raw) or 1
+    medios_labels = [r[0] for r in medios_raw]
+    medios_data   = [round(float(r[1])/total_med*100, 1) for r in medios_raw]
+
+    # ── Gráfico 3: Socias por mes ──
+    nat_m, mai_m = [], []
+    for per in periodos:
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE periodo=%s AND medio ILIKE '%%Natasha%%'", (per,))
+        nat_m.append(float(c.fetchone()[0]))
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE periodo=%s AND medio ILIKE '%%Maira%%'", (per,))
+        mai_m.append(float(c.fetchone()[0]))
+
+    # ── Gráfico 4: Gastos por categoría ──
+    c.execute("SELECT categoria, COALESCE(SUM(monto),0) FROM gastos GROUP BY categoria ORDER BY SUM(monto) DESC LIMIT 7")
+    gastos_cat = c.fetchall()
+    gcat_labels = [r[0] for r in gastos_cat]
+    gcat_data   = [float(r[1]) for r in gastos_cat]
+
+    # ── Gráfico 5: Rendimiento acumulado ──
+    cum_ing, cum_gas = [], []
+    si, sg = 0.0, 0.0
+    for i in range(len(ingresos_m)):
+        si += ingresos_m[i]; sg += gastos_m[i]
+        cum_ing.append(round(si)); cum_gas.append(round(sg))
+
+    # ── Top deudores ──
+    c.execute("""SELECT cl.nombre, SUM(cu.debe-cu.haber) d FROM cuentas cu
+                 JOIN clientes cl ON cl.id=cu.cliente_id
+                 GROUP BY cl.nombre HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC LIMIT 6""")
+    top = c.fetchall()
+
+    # ── Actividad reciente ──
+    c.execute("SELECT fecha,usuario,accion,detalle,cliente_nombre FROM auditoria ORDER BY id DESC LIMIT 8")
+    actividad = c.fetchall()
     conn.close()
-    deuda=td-th;rend=th-tg;pct=int(th/td*100) if td>0 else 0
-    mx=top[0][1] if top else 1
-    barras_deu="".join(f'<div class="chartrow"><span class="cl" title="{n}">{n}</span><div class="cbg"><div class="cfill" style="width:{int(s/mx*100)}%"></div></div><span class="cv">{fmt(s)}</span></div>' for n,s in top) or '<p style="color:var(--muted);font-size:.84rem">Sin deudores 🎉</p>'
+
+    deuda=td-th; rend=th-tg; pct=int(th/td*100) if td>0 else 0
+    total_s=cobro_nat+cobro_mai
+    pct_nat=int(cobro_nat/total_s*100) if total_s>0 else 50; pct_mai=100-pct_nat
+
+    # ── HTML alertas ──
+    alertas=""
+    if n_sin_abono>0:
+        alertas+=f'<div style="background:#fef9ec;border:1px solid #f0d080;border-radius:8px;padding:9px 14px;font-size:.82rem;color:#7a5800;margin-bottom:8px">⚠️ <b>{n_sin_abono}</b> clientes sin honorario asignado · <a href="/clientes" style="color:#7a5800;font-weight:600">Ver clientes →</a></div>'
+    if cajas_pendientes>0:
+        alertas+=f'<div style="background:#fde8e8;border:1px solid #f5a0a0;border-radius:8px;padding:9px 14px;font-size:.82rem;color:#7a1a1a;margin-bottom:8px">🔴 <b>{cajas_pendientes}</b> secretaria(s) cobraron hoy y aún no cerraron su caja · <a href="/caja" style="color:#7a1a1a;font-weight:600">Ver caja →</a></div>'
+
+    # ── HTML deudores ──
+    mx_deu=top[0][1] if top else 1
+    barras_deu="".join(f'<div class="chartrow"><span class="cl" title="{n}">{n}</span><div class="cbg"><div class="cfill" style="width:{int(s/mx_deu*100)}%"></div></div><span class="cv">{fmt(s)}</span></div>' for n,s in top) or '<p style="color:var(--muted);font-size:.84rem;padding:12px 0">Sin deudores 🎉</p>'
+
+    # ── HTML actividad ──
     act_html="".join(f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{a[0]}</span><span class="log-user">{a[1]}</span><span class="log-msg"><b>{a[2]}</b> — {a[3]}{" · "+a[4] if a[4] else ""}</span></div>' for a in actividad) or '<p style="color:var(--muted);font-size:.84rem;padding:10px 0">Sin actividad</p>'
-    total_s=cobro_nat+cobro_mai;pct_nat=int(cobro_nat/total_s*100) if total_s>0 else 50;pct_mai=100-pct_nat
+
+    import json
     body=f"""
     <h1 class="page-title">Panel General</h1>
     <p class="page-sub">Hola, <b>{session.get("display","")}</b> · {now_ar()}</p>
+
+    {alertas}
+
     <div class="stats">
       <div class="scard"><div class="sicon">💰</div><div class="slabel">Total Facturado</div><div class="sval">{fmt(td)}</div></div>
       <div class="scard g"><div class="sicon">✅</div><div class="slabel">Total Cobrado</div><div class="sval">{fmt(th)}</div></div>
@@ -301,37 +384,153 @@ def panel():
       <div class="scard {"g" if rend>=0 else "r"}"><div class="sicon">📊</div><div class="slabel">Rendimiento Real</div><div class="sval">{fmt(rend)}</div></div>
       <div class="scard b"><div class="sicon">👥</div><div class="slabel">Clientes</div><div class="sval">{nc}</div></div>
     </div>
-    <div class="fcard" style="margin-bottom:20px">
+
+    <div class="fcard" style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span style="font-weight:600;color:var(--primary)">Cobrado vs Facturado</span>
         <span style="font-weight:700;color:var(--success)">{pct}%</span>
       </div>
       <div class="progwrap"><div class="progbar" style="width:{pct}%"></div></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px" class="twocol">
+
+    <!-- Socias cards -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px" class="twocol">
       <div class="partner-card">
         <div class="partner-name">🏦 Natasha Carlon</div>
         <div class="partner-amt" style="color:var(--primary)">{fmt(cobro_nat)}</div>
-        <div style="font-size:.74rem;color:var(--muted)">{pct_nat}% del total cobrado</div>
+        <div style="font-size:.72rem;color:var(--muted)">{pct_nat}% del total cobrado</div>
       </div>
       <div class="partner-card">
         <div class="partner-name">🏦 Maira Carlon</div>
         <div class="partner-amt" style="color:var(--info)">{fmt(cobro_mai)}</div>
-        <div style="font-size:.74rem;color:var(--muted)">{pct_mai}% del total cobrado</div>
+        <div style="font-size:.72rem;color:var(--muted)">{pct_mai}% del total cobrado</div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px" class="twocol">
-      <div class="fcard" style="margin-bottom:0"><h3>📈 Cobros Mensuales</h3>{svg_barras(cobros_mes)}</div>
-      <div class="fcard" style="margin-bottom:0"><h3>🔴 Top Deudores</h3>{barras_deu}</div>
+
+    <!-- Gráfico 1: Ingresos vs Gastos -->
+    <div class="fcard" style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="border:none;padding:0;margin:0">📈 Ingresos vs Gastos — últimos meses</h3>
+        <div style="display:flex;gap:14px;font-size:.76rem;color:var(--muted)">
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#185FA5;margin-right:4px"></span>Cobrado</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#E24B4A;margin-right:4px"></span>Gastos</span>
+        </div>
+      </div>
+      <div style="position:relative;height:220px"><canvas id="ch1" role="img" aria-label="Ingresos y gastos por mes"></canvas></div>
     </div>
-    <div class="fcard"><h3>🕓 Actividad Reciente</h3>{act_html}</div>
+
+    <!-- Fila 2: Socias + Medios de pago -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px" class="twocol">
+      <div class="fcard" style="margin-bottom:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="border:none;padding:0;margin:0">🤝 Cobros por socia</h3>
+          <div style="display:flex;gap:10px;font-size:.74rem;color:var(--muted)">
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#185FA5;margin-right:3px"></span>Natasha</span>
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#0F6E56;margin-right:3px"></span>Maira</span>
+          </div>
+        </div>
+        <div style="position:relative;height:185px"><canvas id="ch2" role="img" aria-label="Cobros por socia por mes"></canvas></div>
+      </div>
+      <div class="fcard" style="margin-bottom:0">
+        <h3 style="border:none;padding:0;margin:0 0 10px">💳 Medios de pago</h3>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div style="position:relative;height:160px;width:160px;flex-shrink:0"><canvas id="ch3" role="img" aria-label="Distribución de medios de pago"></canvas></div>
+          <div id="leg3" style="font-size:.74rem;color:var(--muted);display:flex;flex-direction:column;gap:5px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fila 3: Gastos cat + Rendimiento acumulado -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px" class="twocol">
+      <div class="fcard" style="margin-bottom:0">
+        <h3 style="border:none;padding:0;margin:0 0 12px">💸 Gastos por categoría</h3>
+        <div id="gcat" style="display:flex;flex-direction:column;gap:7px"></div>
+      </div>
+      <div class="fcard" style="margin-bottom:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="border:none;padding:0;margin:0">📊 Rendimiento acumulado</h3>
+          <div style="display:flex;gap:10px;font-size:.74rem;color:var(--muted)">
+            <span><span style="display:inline-block;width:20px;height:3px;background:#1D9E75;margin-right:3px;vertical-align:middle"></span>Ingresos</span>
+            <span><span style="display:inline-block;width:20px;height:3px;background:#E24B4A;border-top:2px dashed #E24B4A;margin-right:3px;vertical-align:middle"></span>Gastos</span>
+          </div>
+        </div>
+        <div style="position:relative;height:170px"><canvas id="ch4" role="img" aria-label="Rendimiento acumulado ingresos vs gastos"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Fila 4: Top deudores + Actividad -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px" class="twocol">
+      <div class="fcard" style="margin-bottom:0"><h3>🔴 Top Deudores</h3>{barras_deu}</div>
+      <div class="fcard" style="margin-bottom:0"><h3>🕓 Actividad Reciente</h3>{act_html}</div>
+    </div>
+
     <div class="qa">
       <a href="/clientes" class="btn btn-p">👥 Clientes</a>
       <a href="/deudas" class="btn btn-a">🔔 Deudores ({nd})</a>
       <a href="/gastos" class="btn btn-o">💸 Gastos</a>
+      <a href="/caja" class="btn btn-o">🗃️ Caja</a>
       <a href="/reportes" class="btn btn-b">📊 Reportes</a>
       <a href="/usuarios" class="btn btn-o">👤 Usuarios</a>
     </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script>
+    const P  = {json.dumps(periodos)};
+    const IM = {json.dumps(ingresos_m)};
+    const GM = {json.dumps(gastos_m)};
+    const NM = {json.dumps(nat_m)};
+    const MM = {json.dumps(mai_m)};
+    const ML = {json.dumps(medios_labels)};
+    const MD = {json.dumps(medios_data)};
+    const GL = {json.dumps(gcat_labels)};
+    const GD = {json.dumps(gcat_data)};
+    const CI = {json.dumps(cum_ing)};
+    const CG = {json.dumps(cum_gas)};
+
+    const MCOLS = ['#185FA5','#0F6E56','#1D9E75','#E67E22','#7B68EE','#E24B4A','#888780'];
+    const isDark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const gc = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+    const tc = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.42)';
+    const fmtK = v => '$' + (Math.abs(v)>=1000000 ? (v/1000000).toFixed(1)+'M' : Math.abs(v)>=1000 ? (v/1000).toFixed(0)+'k' : Math.round(v));
+    const fmtFull = v => '$' + Math.round(v).toLocaleString('es-AR');
+    const base = {{responsive:true,maintainAspectRatio:false,
+      plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>' '+ctx.dataset.label+': '+fmtFull(ctx.raw)}}}}}},
+      scales:{{x:{{ticks:{{color:tc,font:{{size:10}},autoSkip:false,maxRotation:0}},grid:{{color:gc}}}},
+               y:{{ticks:{{color:tc,font:{{size:10}},callback:fmtK}},grid:{{color:gc}}}}}}}};
+
+    new Chart(document.getElementById('ch1'),{{type:'bar',
+      data:{{labels:P,datasets:[
+        {{label:'Cobrado',data:IM,backgroundColor:'#185FA5',borderRadius:4}},
+        {{label:'Gastos', data:GM,backgroundColor:'#E24B4A',borderRadius:4}}
+      ]}},options:base}});
+
+    new Chart(document.getElementById('ch2'),{{type:'bar',
+      data:{{labels:P,datasets:[
+        {{label:'Natasha',data:NM,backgroundColor:'#185FA5',borderRadius:3}},
+        {{label:'Maira',  data:MM,backgroundColor:'#0F6E56',borderRadius:3}}
+      ]}},options:base}});
+
+    new Chart(document.getElementById('ch3'),{{type:'doughnut',
+      data:{{labels:ML,datasets:[{{data:MD,backgroundColor:MCOLS.slice(0,ML.length),
+        borderWidth:2,borderColor:isDark?'#1a1a1a':'#fff'}}]}},
+      options:{{responsive:true,maintainAspectRatio:false,cutout:'60%',
+        plugins:{{legend:{{display:false}},
+          tooltip:{{callbacks:{{label:ctx=>' '+ctx.label+': '+ctx.raw+'%'}}}}}}}}}});
+    const leg3=document.getElementById('leg3');
+    ML.forEach((l,i)=>{{leg3.innerHTML+=`<span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${{MCOLS[i]}};flex-shrink:0;display:inline-block"></span>${{l}} <b style="color:var(--text)">${{MD[i]}}%</b></span>`;}});
+
+    const gcDiv=document.getElementById('gcat');
+    const maxG=Math.max(...GD)||1;
+    GL.forEach((l,i)=>{{gcDiv.innerHTML+=`<div style="display:flex;align-items:center;gap:7px;font-size:.78rem"><span style="width:100px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${{l}}</span><div style="flex:1;background:var(--border);border-radius:3px;height:7px"><div style="width:${{Math.round(GD[i]/maxG*100)}}%;height:100%;background:#E67E22;border-radius:3px"></div></div><span style="width:70px;text-align:right;font-weight:600;color:var(--text)">${{fmtK(GD[i])}}</span></div>`;}});
+
+    new Chart(document.getElementById('ch4'),{{type:'line',
+      data:{{labels:P,datasets:[
+        {{label:'Ingresos',data:CI,borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,0.07)',
+          fill:true,tension:0.35,pointRadius:3,pointBackgroundColor:'#1D9E75'}},
+        {{label:'Gastos',  data:CG,borderColor:'#E24B4A',backgroundColor:'rgba(226,75,74,0.05)',
+          fill:true,tension:0.35,pointRadius:3,pointBackgroundColor:'#E24B4A',borderDash:[5,3]}}
+      ]}},options:base}});
+    </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
     return page("Panel",body,"Panel")
 
