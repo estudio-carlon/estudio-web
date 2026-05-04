@@ -537,12 +537,27 @@ def init_db():
 
     conn.commit()
     conn.close()
-  def actualizar_db():
-    conn=conectar();c=conn.cursor()
-    for ddl in ["ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email TEXT","ALTER TABLE clientes ADD COLUMN IF NOT EXISTS abono REAL DEFAULT 0","ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre_display TEXT","ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol TEXT DEFAULT 'secretaria'","ALTER TABLE auditoria ADD COLUMN IF NOT EXISTS cliente_nombre TEXT","ALTER TABLE pagos ADD COLUMN IF NOT EXISTS observaciones TEXT","ALTER TABLE pagos ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT FALSE","ALTER TABLE pagos ADD COLUMN IF NOT EXISTS emitido_por TEXT"]:
-        try: c.execute(ddl)
-        except: conn.rollback()
-    conn.commit();conn.close()
+def actualizar_db():
+    conn = conectar()
+    c = conn.cursor()
+
+    for ddl in [
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email TEXT",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS abono REAL DEFAULT 0",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre_display TEXT",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol TEXT DEFAULT 'secretaria'",
+        "ALTER TABLE auditoria ADD COLUMN IF NOT EXISTS cliente_nombre TEXT",
+        "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS observaciones TEXT",
+        "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS emitido_por TEXT"
+    ]:
+        try:
+            c.execute(ddl)
+        except:
+            conn.rollback()
+
+    conn.commit()
+    conn.close()
 
 def generar_deuda_mensual():
     conn=conectar();c=conn.cursor()
