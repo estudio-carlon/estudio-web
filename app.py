@@ -144,8 +144,6 @@ nav{background:var(--primary);padding:0 28px;display:flex;align-items:center;jus
 @media(max-width:680px){.stats{grid-template-columns:1fr 1fr}.arow{flex-direction:column;align-items:flex-start}nav .user-pill{display:none}.wrap{padding:18px 12px}.nav-links a{padding:5px 8px;font-size:.78rem}.caja-medios{gap:5px}.caja-item{min-width:75px;padding:6px 10px}}
 """
 
-      ASISTENTE IA v2 — RESPUESTAS PREDEFINIDAS + GOOGLE/AFIP
-
 def nav_html(active=""):
     user = session.get("user", "")
     rol = session.get("rol", "secretaria")
