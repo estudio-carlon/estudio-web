@@ -1,254 +1,314 @@
 # ══════════════════════════════════════════════════════
-#  ASISTENTE IA — ESTUDIO CARLON
-#  Agregar estas dos partes al app.py
+#  AGENDA DE VENCIMIENTOS IMPOSITIVOS — ESTUDIO CARLON
+#  Agregar al app.py
 # ══════════════════════════════════════════════════════
 
 # ─────────────────────────────────────────────────────
-# PARTE 1: Importaciones adicionales necesarias
-# Agregar al inicio del archivo, junto a los otros imports
-# ─────────────────────────────────────────────────────
-import json
-import urllib.request
-
-# ─────────────────────────────────────────────────────
-# PARTE 2: Ruta /asistente
-# Agregar antes de la línea: if __name__=="__main__":
+# PASO 1: En init_db(), agregar esta tabla nueva
+# Dentro del bloque de c.execute existentes:
 # ─────────────────────────────────────────────────────
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+INIT_AGENDA_SQL = """
+    c.execute('''CREATE TABLE IF NOT EXISTS agenda_vencimientos(
+        id SERIAL PRIMARY KEY,
+        vencimiento_id TEXT,
+        mes INTEGER,
+        anio INTEGER,
+        estado TEXT DEFAULT 'pendiente',
+        nota TEXT DEFAULT '',
+        usuario TEXT,
+        fecha_actualizacion TEXT,
+        UNIQUE(vencimiento_id, mes, anio)
+    )''')
+"""
+# ↑ Pegar ese c.execute(...) dentro de init_db(), junto a los otros CREATE TABLE
 
-SYSTEM_ASISTENTE = """Sos el asistente virtual del Estudio Contable Carlon, ubicado en Quimilí, Santiago del Estero, Argentina.
 
-Tu función es ayudar al personal del estudio (secretarias y contadoras) con:
-- Dudas contables e impositivas generales
-- Instrucciones para presentar declaraciones juradas (DDJJ) en AFIP/ARCA
-- IVA, Ganancias, Bienes Personales, Monotributo, Empleados en Relación de Dependencia
-- Vencimientos y fechas importantes de AFIP
-- Consultas sobre el sistema interno (cómo registrar pagos, agregar clientes, cerrar caja, generar recibos, etc.)
-- Terminología contable e impositiva
-- Procedimientos de facturación electrónica en ARCA
+# ─────────────────────────────────────────────────────
+# PASO 2: Lista de vencimientos fijos del estudio
+# Agregar como constante global, después de CATEGORIAS_GASTO
+# ─────────────────────────────────────────────────────
 
-RESTRICCIONES ABSOLUTAS — NUNCA respondas sobre:
-- Cómo editar, modificar, corregir o cambiar pagos ya registrados
-- Cómo eliminar pagos o movimientos de caja
-- Cómo revertir o anular cobros en el sistema
-- Cómo modificar importes ya cargados en la base de datos
-- Cualquier instrucción que implique alterar registros financieros existentes del estudio
+VENCIMIENTOS_IMPOSITIVOS = [
+    {"id": "ib_cat_a",   "nombre": "Ingresos Brutos — Categoría A",   "dia": 18, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría A · Ingresos Brutos · vence el 18 de cada mes"},
+    {"id": "ib_cat_b",   "nombre": "Ingresos Brutos — Categoría B",   "dia": 15, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría B · Ingresos Brutos · vence el 15 de cada mes"},
+    {"id": "iva_ddjj",   "nombre": "IVA — Declaración Jurada (F.731)","dia": 20, "tipo": "AFIP",                  "detalle": "Formulario 731 / SIAP · presentación mensual · fecha según CUIT"},
+    {"id": "f931_1",     "nombre": "Aportes y Contribuciones F.931",  "dia": 9,  "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 1ra quincena · SUSS · vence el 9"},
+    {"id": "f931_2",     "nombre": "Aportes y Contribuciones F.931",  "dia": 11, "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 2da quincena · SUSS · vence el 11"},
+    {"id": "ganancias",  "nombre": "Ganancias — Anticipo mensual",    "dia": 23, "tipo": "AFIP",                  "detalle": "Anticipo según cronograma AFIP — aproximado día 23"},
+    {"id": "monotributo","nombre": "Monotributo — Cuota mensual",     "dia": 20, "tipo": "AFIP",                  "detalle": "Cuota unificada mensual — todos los contribuyentes"},
+    {"id": "suss_ddjj",  "nombre": "SUSS — Declaración Jurada",       "dia": 9,  "tipo": "AFIP",                  "detalle": "Sistema Único de Seguridad Social · F.931 mensual"},
+    {"id": "rentas_prov","nombre": "Rentas Provinciales — Anticipo",  "dia": 20, "tipo": "Rentas SGO",            "detalle": "Dirección General de Rentas · Santiago del Estero"},
+]
 
-Si te preguntan algo de esas categorías, respondé exactamente: 
-"Esa consulta debe realizarse directamente con el administrador del sistema. Por razones de seguridad y auditoría, no puedo dar instrucciones sobre modificación de registros financieros."
 
-Respondé siempre en español, de forma clara y concisa. Usá ejemplos prácticos cuando sea útil.
-Para consultas sobre AFIP/ARCA, mencioná siempre que los procedimientos pueden cambiar y recomendá verificar en afip.gob.ar."""
+# ─────────────────────────────────────────────────────
+# PASO 3: Rutas de la agenda
+# Agregar antes de if __name__=="__main__":
+# ─────────────────────────────────────────────────────
 
-@app.route("/asistente", methods=["POST"])
+@app.route("/agenda", methods=["GET"])
 @login_req
-def asistente():
-    try:
-        data = request.get_json()
-        mensajes = data.get("mensajes", [])
-        
-        if not mensajes:
-            return json.dumps({"error": "Sin mensajes"}), 400
-        
-        # Limitar historial a últimos 10 mensajes para no exceder tokens
-        mensajes = mensajes[-10:]
-        
-        # Validar que solo sean roles permitidos
-        mensajes_limpios = [
-            {"role": m["role"], "content": str(m["content"])[:2000]}
-            for m in mensajes
-            if m.get("role") in ("user", "assistant")
-        ]
-        
-        payload = json.dumps({
-            "model": "claude-sonnet-4-20250514",
-            "max_tokens": 1024,
-            "system": SYSTEM_ASISTENTE,
-            "messages": mensajes_limpios
-        }).encode("utf-8")
-        
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01"
-            },
-            method="POST"
-        )
-        
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            resultado = json.loads(resp.read().decode("utf-8"))
-        
-        texto = resultado["content"][0]["text"]
-        
-        # Registrar uso en auditoría (sin guardar el contenido por privacidad)
-        registrar_auditoria("ASISTENTE IA", f"Consulta de {session.get('display','')}")
-        
-        return json.dumps({"respuesta": texto}), 200, {"Content-Type": "application/json"}
-    
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        return json.dumps({"error": f"API error: {e.code}"}), 500, {"Content-Type": "application/json"}
-    except Exception as e:
-        return json.dumps({"error": str(e)}), 500, {"Content-Type": "application/json"}
+def agenda():
+    import json as _json
+    mes = int(request.args.get("mes", datetime.now().month))
+    anio = int(request.args.get("anio", datetime.now().year))
 
+    conn = conectar(); c = conn.cursor()
 
-# ─────────────────────────────────────────────────────
-# PARTE 3: HTML del widget flotante
-# Reemplazar la función nav_html() existente con esta versión
-# que incluye el botón flotante y el panel del chat
-# ─────────────────────────────────────────────────────
+    # Traer estados guardados para este mes/año
+    c.execute("""SELECT vencimiento_id, estado, nota, usuario, fecha_actualizacion
+                 FROM agenda_vencimientos WHERE mes=%s AND anio=%s""", (mes, anio))
+    estados_db = {r[0]: {"estado": r[1], "nota": r[2] or "", "usuario": r[3], "fecha": r[4]} for r in c.fetchall()}
 
-def nav_html(active=""):
-    user = session.get("user", "")
-    rol = session.get("rol", "secretaria")
-    disp = session.get("display", user)
-    links_admin = [("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),
-                   ("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/usuarios","Usuarios")]
-    links_sec = [("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja")]
-    links = links_admin if rol == "admin" else links_sec
-    items = "".join(f'<a href="{h}" class="{"act" if active==l else ""}">{l}</a>' for h,l in links)
-    items += '<a href="/logout" class="logout">Salir</a>'
-    badge = f'<span class="rbadge {"admin" if rol=="admin" else "sec"}">{"Admin" if rol=="admin" else "Sec."}</span>'
+    # Alertas: vencimientos próximos (próximos 5 días) o vencidos sin presentar
+    hoy = datetime.now()
+    alertas = []
+    for v in VENCIMIENTOS_IMPOSITIVOS:
+        est = estados_db.get(v["id"], {}).get("estado", "pendiente")
+        if est == "presentado":
+            continue
+        try:
+            fecha_v = datetime(anio, mes, v["dia"])
+            diff = (fecha_v - hoy).days
+            if diff < 0:
+                alertas.append(f"⚠ {v['nombre']} venció hace {abs(diff)} días sin presentar")
+            elif diff <= 5:
+                alertas.append(f"🔔 {v['nombre']} vence en {'HOY' if diff==0 else str(diff)+' días'}")
+        except:
+            pass
 
-    # Widget del asistente IA
-    asistente_widget = """
-<div id="ai-btn" onclick="toggleChat()" style="position:fixed;bottom:24px;right:24px;z-index:1000;width:52px;height:52px;border-radius:50%;background:#1A3A2A;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,0.25);transition:transform .2s" title="Asistente IA">
-  <span style="font-size:22px">🤖</span>
-  <span id="ai-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#E24B4A;color:#fff;font-size:10px;font-weight:700;padding:2px 5px;border-radius:10px">!</span>
-</div>
+    # Estadísticas
+    stats = {"total": len(VENCIMIENTOS_IMPOSITIVOS), "presentado": 0, "borrador": 0, "pendiente": 0, "observado": 0}
+    for v in VENCIMIENTOS_IMPOSITIVOS:
+        est = estados_db.get(v["id"], {}).get("estado", "pendiente")
+        stats[est] = stats.get(est, 0) + 1
 
-<div id="ai-panel" style="display:none;position:fixed;bottom:88px;right:24px;z-index:999;width:360px;max-width:calc(100vw - 32px);background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,0.18);overflow:hidden;flex-direction:column;font-family:'DM Sans',sans-serif">
-  
-  <div style="background:#1A3A2A;padding:14px 16px;display:flex;align-items:center;justify-content:space-between">
-    <div style="display:flex;align-items:center;gap:10px">
-      <div style="width:36px;height:36px;border-radius:50%;background:#C8A96E;display:flex;align-items:center;justify-content:center;font-size:18px">🤖</div>
+    # Actividad reciente
+    c.execute("""SELECT vencimiento_id, estado, nota, usuario, fecha_actualizacion
+                 FROM agenda_vencimientos WHERE mes=%s AND anio=%s ORDER BY id DESC LIMIT 10""", (mes, anio))
+    actividad = c.fetchall()
+    conn.close()
+
+    MESES_ESP = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+
+    # Navegación mes anterior/siguiente
+    mes_ant = mes - 1 if mes > 1 else 12
+    anio_ant = anio if mes > 1 else anio - 1
+    mes_sig = mes + 1 if mes < 12 else 1
+    anio_sig = anio if mes < 12 else anio + 1
+
+    # HTML de vencimientos
+    filas = ""
+    for v in sorted(VENCIMIENTOS_IMPOSITIVOS, key=lambda x: x["dia"]):
+        est_data = estados_db.get(v["id"], {"estado": "pendiente", "nota": "", "usuario": "", "fecha": ""})
+        est = est_data["estado"]
+        nota = est_data["nota"]
+        ult_usuario = est_data["usuario"]
+        ult_fecha = est_data["fecha"]
+
+        try:
+            fecha_v = datetime(anio, mes, v["dia"])
+            diff = (fecha_v - hoy).days
+        except:
+            diff = 99
+
+        # Clase de la card
+        if est == "presentado":
+            clase = "ok"
+        elif diff < 0:
+            clase = "vencido"
+        elif diff == 0:
+            clase = "hoy"
+        elif diff <= 5:
+            clase = "proximo"
+        else:
+            clase = ""
+
+        # Badge días
+        if est == "presentado":
+            dias_badge = '<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#E1F5EE;color:#085041;font-weight:600">✓ Presentado</span>'
+        elif diff < 0:
+            dias_badge = f'<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#FCEBEB;color:#791F1F;font-weight:600">Venció hace {abs(diff)}d</span>'
+        elif diff == 0:
+            dias_badge = '<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#FAEEDA;color:#633806;font-weight:600">⚡ Vence HOY</span>'
+        elif diff <= 5:
+            dias_badge = f'<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#E6F1FB;color:#0C447C;font-weight:600">En {diff} días</span>'
+        else:
+            dias_badge = f'<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted)">En {diff} días</span>'
+
+        # Badge estado
+        ESTADOS_BADGE = {
+            "pendiente":  '<span class="badge" style="background:#fef3cd;color:#9a6700">⏳ Pendiente</span>',
+            "borrador":   '<span class="badge" style="background:#dce8ff;color:#1a4a8a">📝 Borrador</span>',
+            "presentado": '<span class="badge" style="background:#d5f5e3;color:#1a7a42">✅ Presentado</span>',
+            "observado":  '<span class="badge" style="background:#fde8e8;color:#c0392b">⚠ Observado</span>',
+        }
+        badge_est = ESTADOS_BADGE.get(est, "")
+
+        tipo_badge = f'<span style="font-size:.68rem;padding:2px 7px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border)">{v["tipo"]}</span>'
+
+        ult_act = f'<span style="font-size:.68rem;color:var(--muted)">Actualizado por {ult_usuario} · {ult_fecha}</span>' if ult_usuario else ""
+
+        ESTADOS_OPTS = ["pendiente", "borrador", "presentado", "observado"]
+        ESTADOS_LABELS = {"pendiente": "⏳ Pendiente", "borrador": "📝 En borrador", "presentado": "✅ Presentado", "observado": "⚠ Observado por AFIP"}
+        opts = "".join(f'<option value="{e}" {"selected" if e==est else ""}>{ESTADOS_LABELS[e]}</option>' for e in ESTADOS_OPTS)
+
+        border_color = {"ok": "var(--success)", "vencido": "var(--danger)", "hoy": "var(--warning)", "proximo": "var(--info)"}.get(clase, "var(--border)")
+
+        filas += f"""
+        <div style="background:var(--card);border-radius:var(--r);border:0.5px solid var(--border);border-left:3px solid {border_color};padding:14px 16px;margin-bottom:9px">
+          <div style="display:flex;align-items:flex-start;gap:12px">
+            <div style="min-width:46px;text-align:center;background:var(--bg);border-radius:var(--r);padding:6px 8px">
+              <div style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary);line-height:1">{v["dia"]}</div>
+              <div style="font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">{MESES_ESP[mes][:3]}</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;color:var(--primary);font-size:.93rem">{v["nombre"]}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:5px">
+                {tipo_badge}{dias_badge}{badge_est}
+              </div>
+              <div style="font-size:.75rem;color:var(--muted);margin-top:4px">{v["detalle"]}</div>
+              {f'<div style="margin-top:4px">{ult_act}</div>' if ult_act else ""}
+
+              <form method="post" action="/agenda/actualizar" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+                <input type="hidden" name="venc_id" value="{v["id"]}">
+                <input type="hidden" name="mes" value="{mes}">
+                <input type="hidden" name="anio" value="{anio}">
+                <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                  <div class="fg" style="min-width:180px">
+                    <label>Estado</label>
+                    <select name="estado" style="font-size:.82rem">{opts}</select>
+                  </div>
+                  <div class="fg" style="flex:1;min-width:200px">
+                    <label>Nota / avance</label>
+                    <input name="nota" value="{nota}" placeholder="Ej: borrador listo, N° presentación 123456..." style="font-size:.82rem">
+                  </div>
+                  <button type="submit" class="btn btn-p btn-sm">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>"""
+
+    # HTML actividad reciente
+    act_html = ""
+    NOMBRES_V = {v["id"]: v["nombre"] for v in VENCIMIENTOS_IMPOSITIVOS}
+    for a in actividad:
+        ESTADOS_LABELS2 = {"pendiente": "Pendiente", "borrador": "En borrador", "presentado": "Presentado", "observado": "Observado"}
+        act_html += f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{a[4]}</span><span class="log-user">{a[3]}</span><span class="log-msg"><b>{NOMBRES_V.get(a[0], a[0])}</b> → {ESTADOS_LABELS2.get(a[1], a[1])}{" · "+a[2] if a[2] else ""}</span></div>'
+
+    # Alertas HTML
+    alerta_html = ""
+    if alertas:
+        alerta_html = '<div class="warn-box" style="margin-bottom:16px">' + "<br>".join(alertas) + "</div>"
+
+    # Progress bar
+    pct_pres = int(stats["presentado"] / stats["total"] * 100) if stats["total"] > 0 else 0
+
+    body = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:5px">
+      <h1 class="page-title">Agenda de Vencimientos</h1>
+      <div style="display:flex;align-items:center;gap:8px">
+        <a href="/agenda?mes={mes_ant}&anio={anio_ant}" class="btn btn-o btn-sm">← Anterior</a>
+        <span style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary);min-width:160px;text-align:center">{MESES_ESP[mes]} {anio}</span>
+        <a href="/agenda?mes={mes_sig}&anio={anio_sig}" class="btn btn-o btn-sm">Siguiente →</a>
+      </div>
+    </div>
+    <p class="page-sub">Control de vencimientos impositivos · Santiago del Estero</p>
+
+    {alerta_html}
+
+    <div class="stats" style="margin-bottom:18px">
+      <div class="scard"><div class="sicon">📅</div><div class="slabel">Total</div><div class="sval">{stats["total"]}</div></div>
+      <div class="scard g"><div class="sicon">✅</div><div class="slabel">Presentados</div><div class="sval">{stats["presentado"]}</div></div>
+      <div class="scard b"><div class="sicon">📝</div><div class="slabel">En borrador</div><div class="sval">{stats["borrador"]}</div></div>
+      <div class="scard r"><div class="sicon">⏳</div><div class="slabel">Pendientes</div><div class="sval">{stats["pendiente"]}</div></div>
+    </div>
+
+    <div class="fcard" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:.82rem">
+        <span style="font-weight:600;color:var(--primary)">Progreso del mes</span>
+        <span style="color:var(--success);font-weight:700">{pct_pres}% presentado</span>
+      </div>
+      <div class="progwrap"><div class="progbar" style="width:{pct_pres}%"></div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start" class="twocol">
+      <div>{filas}</div>
       <div>
-        <div style="color:#fff;font-weight:600;font-size:.9rem">Asistente Estudio Carlon</div>
-        <div style="color:rgba(255,255,255,.55);font-size:.72rem;display:flex;align-items:center;gap:4px">
-          <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block"></span>
-          En línea · IA
+        <div class="fcard" style="margin-bottom:14px">
+          <h3>🕓 Actividad reciente</h3>
+          {act_html or '<p style="color:var(--muted);font-size:.84rem">Sin actividad este mes</p>'}
+        </div>
+        <div class="info-box">
+          <b>Leyenda de estados:</b><br>
+          ⏳ Pendiente — todavía no empezó<br>
+          📝 En borrador — en proceso de preparación<br>
+          ✅ Presentado — entregado en AFIP/Rentas<br>
+          ⚠ Observado — AFIP solicitó corrección
         </div>
       </div>
     </div>
-    <button onclick="toggleChat()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px;padding:4px;line-height:1">✕</button>
-  </div>
-  
-  <div id="ai-msgs" style="height:320px;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#F7F5F0">
-    <div style="background:#fff;border-radius:4px 14px 14px 14px;padding:10px 13px;font-size:.83rem;color:#1C1C1C;max-width:88%;line-height:1.55;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
-      ¡Hola! Soy el asistente del Estudio. Puedo ayudarte con dudas contables, impositivas, declaraciones juradas, AFIP y más.<br><br>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
-        <button onclick="quickQ(this)" data-q="¿Cómo presento el IVA en AFIP?" style="background:#F0EDE8;border:1px solid #E4DDD0;border-radius:20px;padding:4px 10px;font-size:.74rem;cursor:pointer;color:#1A3A2A">IVA en AFIP</button>
-        <button onclick="quickQ(this)" data-q="¿Cómo registro un empleado en AFIP?" style="background:#F0EDE8;border:1px solid #E4DDD0;border-radius:20px;padding:4px 10px;font-size:.74rem;cursor:pointer;color:#1A3A2A">Empleado en AFIP</button>
-        <button onclick="quickQ(this)" data-q="¿Cuándo vencen las declaraciones juradas?" style="background:#F0EDE8;border:1px solid #E4DDD0;border-radius:20px;padding:4px 10px;font-size:.74rem;cursor:pointer;color:#1A3A2A">Vencimientos DDJJ</button>
-        <button onclick="quickQ(this)" data-q="¿Cómo facturo en ARCA?" style="background:#F0EDE8;border:1px solid #E4DDD0;border-radius:20px;padding:4px 10px;font-size:.74rem;cursor:pointer;color:#1A3A2A">Facturar en ARCA</button>
-      </div>
-    </div>
-  </div>
-  
-  <div style="padding:10px 12px;background:#fff;border-top:1px solid #E4DDD0;display:flex;gap:8px;align-items:flex-end">
-    <textarea id="ai-input" placeholder="Escribí tu consulta..." rows="1"
-      style="flex:1;border:1.5px solid #E4DDD0;border-radius:12px;padding:8px 12px;font-family:'DM Sans',sans-serif;font-size:.84rem;resize:none;outline:none;line-height:1.45;max-height:100px;overflow-y:auto;background:#F7F5F0"
-      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAI()}"
-      oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
-    <button onclick="sendAI()" id="ai-send" style="width:36px;height:36px;border-radius:50%;background:#1A3A2A;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .2s">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-    </button>
-  </div>
-</div>
+    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
 
-<script>
-var aiHistorial = [];
-var aiAbierto = false;
+    return page("Agenda de Vencimientos", body, "Agenda")
 
-function toggleChat() {
-  aiAbierto = !aiAbierto;
-  var p = document.getElementById('ai-panel');
-  p.style.display = aiAbierto ? 'flex' : 'none';
-  if(aiAbierto) {
-    document.getElementById('ai-badge').style.display = 'none';
-    setTimeout(function(){ document.getElementById('ai-input').focus(); }, 100);
-  }
-}
 
-function addMsgAI(texto, tipo) {
-  var box = document.getElementById('ai-msgs');
-  var d = document.createElement('div');
-  if(tipo === 'user') {
-    d.style.cssText = 'background:#1A3A2A;color:#fff;border-radius:14px 4px 14px 14px;padding:9px 13px;font-size:.83rem;max-width:88%;align-self:flex-end;margin-left:auto;line-height:1.55;white-space:pre-wrap';
-  } else {
-    d.style.cssText = 'background:#fff;border-radius:4px 14px 14px 14px;padding:10px 13px;font-size:.83rem;color:#1C1C1C;max-width:88%;line-height:1.55;box-shadow:0 1px 4px rgba(0,0,0,0.06);white-space:pre-wrap';
-  }
-  d.textContent = texto;
-  box.appendChild(d);
-  box.scrollTop = box.scrollHeight;
-}
+@app.route("/agenda/actualizar", methods=["POST"])
+@login_req
+def agenda_actualizar():
+    venc_id = request.form.get("venc_id", "").strip()
+    mes = int(request.form.get("mes", datetime.now().month))
+    anio = int(request.form.get("anio", datetime.now().year))
+    estado = request.form.get("estado", "pendiente")
+    nota = request.form.get("nota", "").strip()
 
-function showTypingAI() {
-  var box = document.getElementById('ai-msgs');
-  var t = document.createElement('div');
-  t.id = 'ai-typing';
-  t.style.cssText = 'display:flex;align-items:center;gap:4px;padding:10px 13px;background:#fff;border-radius:4px 14px 14px 14px;width:52px;box-shadow:0 1px 4px rgba(0,0,0,0.06)';
-  t.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:#C8A96E;animation:aib 1.2s infinite"></span><span style="width:6px;height:6px;border-radius:50%;background:#C8A96E;animation:aib 1.2s .2s infinite"></span><span style="width:6px;height:6px;border-radius:50%;background:#C8A96E;animation:aib 1.2s .4s infinite"></span>';
-  box.appendChild(t);
-  box.scrollTop = box.scrollHeight;
-}
+    # Validar que el venc_id sea uno conocido
+    ids_validos = {v["id"] for v in VENCIMIENTOS_IMPOSITIVOS}
+    if venc_id not in ids_validos:
+        return redirect(f"/agenda?mes={mes}&anio={anio}")
 
-function quickQ(btn) {
-  var q = btn.getAttribute('data-q');
-  document.getElementById('ai-input').value = q;
-  sendAI();
-}
+    conn = conectar(); c = conn.cursor()
+    c.execute("""INSERT INTO agenda_vencimientos(vencimiento_id, mes, anio, estado, nota, usuario, fecha_actualizacion)
+                 VALUES(%s,%s,%s,%s,%s,%s,%s)
+                 ON CONFLICT(vencimiento_id, mes, anio)
+                 DO UPDATE SET estado=%s, nota=%s, usuario=%s, fecha_actualizacion=%s""",
+              (venc_id, mes, anio, estado, nota, session.get("display",""), now_ar(),
+               estado, nota, session.get("display",""), now_ar()))
+    conn.commit(); conn.close()
 
-function sendAI() {
-  var inp = document.getElementById('ai-input');
-  var txt = inp.value.trim();
-  if(!txt) return;
-  inp.value = '';
-  inp.style.height = 'auto';
-  
-  addMsgAI(txt, 'user');
-  aiHistorial.push({role:'user', content: txt});
-  
-  var btn = document.getElementById('ai-send');
-  btn.style.opacity = '0.4';
-  btn.disabled = true;
-  showTypingAI();
-  
-  fetch('/asistente', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mensajes: aiHistorial})
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(data) {
-    var t = document.getElementById('ai-typing');
-    if(t) t.remove();
-    btn.style.opacity = '1';
-    btn.disabled = false;
-    if(data.respuesta) {
-      addMsgAI(data.respuesta, 'bot');
-      aiHistorial.push({role:'assistant', content: data.respuesta});
-    } else {
-      addMsgAI('Hubo un error. Intentá de nuevo.', 'bot');
-    }
-  })
-  .catch(function() {
-    var t = document.getElementById('ai-typing');
-    if(t) t.remove();
-    btn.style.opacity = '1';
-    btn.disabled = false;
-    addMsgAI('Sin conexión. Verificá tu red e intentá de nuevo.', 'bot');
-  });
-}
+    # Encontrar nombre del vencimiento para auditoría
+    nombre_v = next((v["nombre"] for v in VENCIMIENTOS_IMPOSITIVOS if v["id"]==venc_id), venc_id)
+    registrar_auditoria("AGENDA ACTUALIZADA", f"{nombre_v} → {estado} | {nota}" if nota else f"{nombre_v} → {estado}")
 
-// Animación del typing
-var style = document.createElement('style');
-style.textContent = '@keyframes aib{0%,80%,100%{opacity:.2}40%{opacity:1}}';
-document.head.appendChild(style);
-</script>
-"""
-    return f'<nav><span class="brand">✦ Estudio Carlon</span><div class="nav-links">{items}</div><div class="user-pill">👤 {disp} {badge}</div></nav>{asistente_widget}'
+    return redirect(f"/agenda?mes={mes}&anio={anio}")
+
+
+# ─────────────────────────────────────────────────────
+# PASO 4: Agregar "Agenda" al menú de navegación
+# En nav_html(), modificar links_admin así:
+# ─────────────────────────────────────────────────────
+
+# links_admin = [
+#     ("/panel","Panel"),
+#     ("/clientes","Clientes"),
+#     ("/deudas","Deudores"),
+#     ("/gastos","Gastos"),
+#     ("/caja","Caja"),
+#     ("/reportes","Reportes"),
+#     ("/agenda","Agenda"),       ← AGREGAR ESTA LÍNEA
+#     ("/usuarios","Usuarios")
+# ]
+
+# ─────────────────────────────────────────────────────
+# PASO 5 (opcional): Agregar Agenda también al menú de secretarias
+# ─────────────────────────────────────────────────────
+
+# links_sec = [
+#     ("/clientes","Clientes"),
+#     ("/deudas","Deudores"),
+#     ("/gastos","Gastos"),
+#     ("/caja","Caja"),
+#     ("/agenda","Agenda"),       ← AGREGAR ESTA LÍNEA
+# ]
