@@ -1,314 +1,270 @@
 # ══════════════════════════════════════════════════════
-#  AGENDA DE VENCIMIENTOS IMPOSITIVOS — ESTUDIO CARLON
-#  Agregar al app.py
+#  ASISTENTE IA v2 — RESPUESTAS PREDEFINIDAS + GOOGLE/AFIP
+#  Reemplazar la función nav_html() existente con esta versión
 # ══════════════════════════════════════════════════════
 
-# ─────────────────────────────────────────────────────
-# PASO 1: En init_db(), agregar esta tabla nueva
-# Dentro del bloque de c.execute existentes:
-# ─────────────────────────────────────────────────────
+# NO necesita API key ni configuración externa
+# Reemplazá tu función nav_html() completa con esta:
 
-INIT_AGENDA_SQL = """
-    c.execute('''CREATE TABLE IF NOT EXISTS agenda_vencimientos(
-        id SERIAL PRIMARY KEY,
-        vencimiento_id TEXT,
-        mes INTEGER,
-        anio INTEGER,
-        estado TEXT DEFAULT 'pendiente',
-        nota TEXT DEFAULT '',
-        usuario TEXT,
-        fecha_actualizacion TEXT,
-        UNIQUE(vencimiento_id, mes, anio)
-    )''')
-"""
-# ↑ Pegar ese c.execute(...) dentro de init_db(), junto a los otros CREATE TABLE
+def nav_html(active=""):
+    user = session.get("user", "")
+    rol = session.get("rol", "secretaria")
+    disp = session.get("display", user)
+    links_admin = [("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),
+                   ("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),
+                   ("/agenda","Agenda"),("/usuarios","Usuarios")]
+    links_sec = [("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),
+                 ("/caja","Caja"),("/agenda","Agenda")]
+    links = links_admin if rol == "admin" else links_sec
+    items = "".join(f'<a href="{h}" class="{"act" if active==l else ""}">{l}</a>' for h,l in links)
+    items += '<a href="/logout" class="logout">Salir</a>'
+    badge = f'<span class="rbadge {"admin" if rol=="admin" else "sec"}">{"Admin" if rol=="admin" else "Sec."}</span>'
 
+    asistente_widget = """
+<div id="ai-btn" onclick="toggleChat()" style="position:fixed;bottom:24px;right:24px;z-index:1000;width:52px;height:52px;border-radius:50%;background:#1A3A2A;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,0.25)" title="Asistente">
+  <span style="font-size:22px">🤖</span>
+</div>
 
-# ─────────────────────────────────────────────────────
-# PASO 2: Lista de vencimientos fijos del estudio
-# Agregar como constante global, después de CATEGORIAS_GASTO
-# ─────────────────────────────────────────────────────
+<div id="ai-panel" style="display:none;position:fixed;bottom:88px;right:24px;z-index:999;width:370px;max-width:calc(100vw - 32px);background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,0.18);overflow:hidden;flex-direction:column;font-family:'DM Sans',sans-serif">
 
-VENCIMIENTOS_IMPOSITIVOS = [
-    {"id": "ib_cat_a",   "nombre": "Ingresos Brutos — Categoría A",   "dia": 18, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría A · Ingresos Brutos · vence el 18 de cada mes"},
-    {"id": "ib_cat_b",   "nombre": "Ingresos Brutos — Categoría B",   "dia": 15, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría B · Ingresos Brutos · vence el 15 de cada mes"},
-    {"id": "iva_ddjj",   "nombre": "IVA — Declaración Jurada (F.731)","dia": 20, "tipo": "AFIP",                  "detalle": "Formulario 731 / SIAP · presentación mensual · fecha según CUIT"},
-    {"id": "f931_1",     "nombre": "Aportes y Contribuciones F.931",  "dia": 9,  "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 1ra quincena · SUSS · vence el 9"},
-    {"id": "f931_2",     "nombre": "Aportes y Contribuciones F.931",  "dia": 11, "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 2da quincena · SUSS · vence el 11"},
-    {"id": "ganancias",  "nombre": "Ganancias — Anticipo mensual",    "dia": 23, "tipo": "AFIP",                  "detalle": "Anticipo según cronograma AFIP — aproximado día 23"},
-    {"id": "monotributo","nombre": "Monotributo — Cuota mensual",     "dia": 20, "tipo": "AFIP",                  "detalle": "Cuota unificada mensual — todos los contribuyentes"},
-    {"id": "suss_ddjj",  "nombre": "SUSS — Declaración Jurada",       "dia": 9,  "tipo": "AFIP",                  "detalle": "Sistema Único de Seguridad Social · F.931 mensual"},
-    {"id": "rentas_prov","nombre": "Rentas Provinciales — Anticipo",  "dia": 20, "tipo": "Rentas SGO",            "detalle": "Dirección General de Rentas · Santiago del Estero"},
-]
-
-
-# ─────────────────────────────────────────────────────
-# PASO 3: Rutas de la agenda
-# Agregar antes de if __name__=="__main__":
-# ─────────────────────────────────────────────────────
-
-@app.route("/agenda", methods=["GET"])
-@login_req
-def agenda():
-    import json as _json
-    mes = int(request.args.get("mes", datetime.now().month))
-    anio = int(request.args.get("anio", datetime.now().year))
-
-    conn = conectar(); c = conn.cursor()
-
-    # Traer estados guardados para este mes/año
-    c.execute("""SELECT vencimiento_id, estado, nota, usuario, fecha_actualizacion
-                 FROM agenda_vencimientos WHERE mes=%s AND anio=%s""", (mes, anio))
-    estados_db = {r[0]: {"estado": r[1], "nota": r[2] or "", "usuario": r[3], "fecha": r[4]} for r in c.fetchall()}
-
-    # Alertas: vencimientos próximos (próximos 5 días) o vencidos sin presentar
-    hoy = datetime.now()
-    alertas = []
-    for v in VENCIMIENTOS_IMPOSITIVOS:
-        est = estados_db.get(v["id"], {}).get("estado", "pendiente")
-        if est == "presentado":
-            continue
-        try:
-            fecha_v = datetime(anio, mes, v["dia"])
-            diff = (fecha_v - hoy).days
-            if diff < 0:
-                alertas.append(f"⚠ {v['nombre']} venció hace {abs(diff)} días sin presentar")
-            elif diff <= 5:
-                alertas.append(f"🔔 {v['nombre']} vence en {'HOY' if diff==0 else str(diff)+' días'}")
-        except:
-            pass
-
-    # Estadísticas
-    stats = {"total": len(VENCIMIENTOS_IMPOSITIVOS), "presentado": 0, "borrador": 0, "pendiente": 0, "observado": 0}
-    for v in VENCIMIENTOS_IMPOSITIVOS:
-        est = estados_db.get(v["id"], {}).get("estado", "pendiente")
-        stats[est] = stats.get(est, 0) + 1
-
-    # Actividad reciente
-    c.execute("""SELECT vencimiento_id, estado, nota, usuario, fecha_actualizacion
-                 FROM agenda_vencimientos WHERE mes=%s AND anio=%s ORDER BY id DESC LIMIT 10""", (mes, anio))
-    actividad = c.fetchall()
-    conn.close()
-
-    MESES_ESP = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
-
-    # Navegación mes anterior/siguiente
-    mes_ant = mes - 1 if mes > 1 else 12
-    anio_ant = anio if mes > 1 else anio - 1
-    mes_sig = mes + 1 if mes < 12 else 1
-    anio_sig = anio if mes < 12 else anio + 1
-
-    # HTML de vencimientos
-    filas = ""
-    for v in sorted(VENCIMIENTOS_IMPOSITIVOS, key=lambda x: x["dia"]):
-        est_data = estados_db.get(v["id"], {"estado": "pendiente", "nota": "", "usuario": "", "fecha": ""})
-        est = est_data["estado"]
-        nota = est_data["nota"]
-        ult_usuario = est_data["usuario"]
-        ult_fecha = est_data["fecha"]
-
-        try:
-            fecha_v = datetime(anio, mes, v["dia"])
-            diff = (fecha_v - hoy).days
-        except:
-            diff = 99
-
-        # Clase de la card
-        if est == "presentado":
-            clase = "ok"
-        elif diff < 0:
-            clase = "vencido"
-        elif diff == 0:
-            clase = "hoy"
-        elif diff <= 5:
-            clase = "proximo"
-        else:
-            clase = ""
-
-        # Badge días
-        if est == "presentado":
-            dias_badge = '<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#E1F5EE;color:#085041;font-weight:600">✓ Presentado</span>'
-        elif diff < 0:
-            dias_badge = f'<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#FCEBEB;color:#791F1F;font-weight:600">Venció hace {abs(diff)}d</span>'
-        elif diff == 0:
-            dias_badge = '<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#FAEEDA;color:#633806;font-weight:600">⚡ Vence HOY</span>'
-        elif diff <= 5:
-            dias_badge = f'<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:#E6F1FB;color:#0C447C;font-weight:600">En {diff} días</span>'
-        else:
-            dias_badge = f'<span style="font-size:.71rem;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted)">En {diff} días</span>'
-
-        # Badge estado
-        ESTADOS_BADGE = {
-            "pendiente":  '<span class="badge" style="background:#fef3cd;color:#9a6700">⏳ Pendiente</span>',
-            "borrador":   '<span class="badge" style="background:#dce8ff;color:#1a4a8a">📝 Borrador</span>',
-            "presentado": '<span class="badge" style="background:#d5f5e3;color:#1a7a42">✅ Presentado</span>',
-            "observado":  '<span class="badge" style="background:#fde8e8;color:#c0392b">⚠ Observado</span>',
-        }
-        badge_est = ESTADOS_BADGE.get(est, "")
-
-        tipo_badge = f'<span style="font-size:.68rem;padding:2px 7px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border)">{v["tipo"]}</span>'
-
-        ult_act = f'<span style="font-size:.68rem;color:var(--muted)">Actualizado por {ult_usuario} · {ult_fecha}</span>' if ult_usuario else ""
-
-        ESTADOS_OPTS = ["pendiente", "borrador", "presentado", "observado"]
-        ESTADOS_LABELS = {"pendiente": "⏳ Pendiente", "borrador": "📝 En borrador", "presentado": "✅ Presentado", "observado": "⚠ Observado por AFIP"}
-        opts = "".join(f'<option value="{e}" {"selected" if e==est else ""}>{ESTADOS_LABELS[e]}</option>' for e in ESTADOS_OPTS)
-
-        border_color = {"ok": "var(--success)", "vencido": "var(--danger)", "hoy": "var(--warning)", "proximo": "var(--info)"}.get(clase, "var(--border)")
-
-        filas += f"""
-        <div style="background:var(--card);border-radius:var(--r);border:0.5px solid var(--border);border-left:3px solid {border_color};padding:14px 16px;margin-bottom:9px">
-          <div style="display:flex;align-items:flex-start;gap:12px">
-            <div style="min-width:46px;text-align:center;background:var(--bg);border-radius:var(--r);padding:6px 8px">
-              <div style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary);line-height:1">{v["dia"]}</div>
-              <div style="font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">{MESES_ESP[mes][:3]}</div>
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;color:var(--primary);font-size:.93rem">{v["nombre"]}</div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:5px">
-                {tipo_badge}{dias_badge}{badge_est}
-              </div>
-              <div style="font-size:.75rem;color:var(--muted);margin-top:4px">{v["detalle"]}</div>
-              {f'<div style="margin-top:4px">{ult_act}</div>' if ult_act else ""}
-
-              <form method="post" action="/agenda/actualizar" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-                <input type="hidden" name="venc_id" value="{v["id"]}">
-                <input type="hidden" name="mes" value="{mes}">
-                <input type="hidden" name="anio" value="{anio}">
-                <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-                  <div class="fg" style="min-width:180px">
-                    <label>Estado</label>
-                    <select name="estado" style="font-size:.82rem">{opts}</select>
-                  </div>
-                  <div class="fg" style="flex:1;min-width:200px">
-                    <label>Nota / avance</label>
-                    <input name="nota" value="{nota}" placeholder="Ej: borrador listo, N° presentación 123456..." style="font-size:.82rem">
-                  </div>
-                  <button type="submit" class="btn btn-p btn-sm">Guardar</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>"""
-
-    # HTML actividad reciente
-    act_html = ""
-    NOMBRES_V = {v["id"]: v["nombre"] for v in VENCIMIENTOS_IMPOSITIVOS}
-    for a in actividad:
-        ESTADOS_LABELS2 = {"pendiente": "Pendiente", "borrador": "En borrador", "presentado": "Presentado", "observado": "Observado"}
-        act_html += f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{a[4]}</span><span class="log-user">{a[3]}</span><span class="log-msg"><b>{NOMBRES_V.get(a[0], a[0])}</b> → {ESTADOS_LABELS2.get(a[1], a[1])}{" · "+a[2] if a[2] else ""}</span></div>'
-
-    # Alertas HTML
-    alerta_html = ""
-    if alertas:
-        alerta_html = '<div class="warn-box" style="margin-bottom:16px">' + "<br>".join(alertas) + "</div>"
-
-    # Progress bar
-    pct_pres = int(stats["presentado"] / stats["total"] * 100) if stats["total"] > 0 else 0
-
-    body = f"""
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:5px">
-      <h1 class="page-title">Agenda de Vencimientos</h1>
-      <div style="display:flex;align-items:center;gap:8px">
-        <a href="/agenda?mes={mes_ant}&anio={anio_ant}" class="btn btn-o btn-sm">← Anterior</a>
-        <span style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary);min-width:160px;text-align:center">{MESES_ESP[mes]} {anio}</span>
-        <a href="/agenda?mes={mes_sig}&anio={anio_sig}" class="btn btn-o btn-sm">Siguiente →</a>
-      </div>
-    </div>
-    <p class="page-sub">Control de vencimientos impositivos · Santiago del Estero</p>
-
-    {alerta_html}
-
-    <div class="stats" style="margin-bottom:18px">
-      <div class="scard"><div class="sicon">📅</div><div class="slabel">Total</div><div class="sval">{stats["total"]}</div></div>
-      <div class="scard g"><div class="sicon">✅</div><div class="slabel">Presentados</div><div class="sval">{stats["presentado"]}</div></div>
-      <div class="scard b"><div class="sicon">📝</div><div class="slabel">En borrador</div><div class="sval">{stats["borrador"]}</div></div>
-      <div class="scard r"><div class="sicon">⏳</div><div class="slabel">Pendientes</div><div class="sval">{stats["pendiente"]}</div></div>
-    </div>
-
-    <div class="fcard" style="margin-bottom:16px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:.82rem">
-        <span style="font-weight:600;color:var(--primary)">Progreso del mes</span>
-        <span style="color:var(--success);font-weight:700">{pct_pres}% presentado</span>
-      </div>
-      <div class="progwrap"><div class="progbar" style="width:{pct_pres}%"></div></div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start" class="twocol">
-      <div>{filas}</div>
+  <div style="background:#1A3A2A;padding:14px 16px;display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:36px;height:36px;border-radius:50%;background:#C8A96E;display:flex;align-items:center;justify-content:center;font-size:18px">🤖</div>
       <div>
-        <div class="fcard" style="margin-bottom:14px">
-          <h3>🕓 Actividad reciente</h3>
-          {act_html or '<p style="color:var(--muted);font-size:.84rem">Sin actividad este mes</p>'}
-        </div>
-        <div class="info-box">
-          <b>Leyenda de estados:</b><br>
-          ⏳ Pendiente — todavía no empezó<br>
-          📝 En borrador — en proceso de preparación<br>
-          ✅ Presentado — entregado en AFIP/Rentas<br>
-          ⚠ Observado — AFIP solicitó corrección
-        </div>
+        <div style="color:#fff;font-weight:600;font-size:.9rem">Asistente Estudio Carlon</div>
+        <div style="color:rgba(255,255,255,.55);font-size:.72rem">Consultas del sistema y contables</div>
       </div>
     </div>
-    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
+    <button onclick="toggleChat()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px;padding:4px">✕</button>
+  </div>
 
-    return page("Agenda de Vencimientos", body, "Agenda")
+  <div id="ai-msgs" style="height:340px;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#F7F5F0">
+    <div style="background:#fff;border-radius:4px 14px 14px 14px;padding:11px 13px;font-size:.83rem;color:#1C1C1C;max-width:90%;line-height:1.6;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      ¡Hola! Puedo ayudarte con el sistema o redirigirte a AFIP y Google para consultas contables. ¿Qué necesitás?
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px">
+        <button class="qbtn" onclick="sendQ('¿Cómo registro un pago?')">💳 Registrar pago</button>
+        <button class="qbtn" onclick="sendQ('¿Cómo cierro la caja?')">🗃 Cerrar caja</button>
+        <button class="qbtn" onclick="sendQ('¿Cómo agrego un cliente?')">👤 Agregar cliente</button>
+        <button class="qbtn" onclick="sendQ('¿Cómo genero un recibo?')">📄 Generar recibo</button>
+        <button class="qbtn" onclick="sendQ('Vencimiento IVA')">📅 Vto. IVA</button>
+        <button class="qbtn" onclick="sendQ('Cómo presentar declaración jurada')">🧾 DDJJ AFIP</button>
+        <button class="qbtn" onclick="sendQ('Monotributo recategorización')">📊 Monotributo</button>
+        <button class="qbtn" onclick="sendQ('Ingresos brutos Santiago del Estero')">🏛 IIBB Sgo.</button>
+      </div>
+    </div>
+  </div>
 
+  <div style="padding:10px 12px;background:#fff;border-top:1px solid #E4DDD0;display:flex;gap:8px;align-items:flex-end">
+    <textarea id="ai-input" placeholder="Escribí tu consulta..." rows="1"
+      style="flex:1;border:1.5px solid #E4DDD0;border-radius:12px;padding:8px 12px;font-family:'DM Sans',sans-serif;font-size:.84rem;resize:none;outline:none;line-height:1.45;max-height:90px;overflow-y:auto;background:#F7F5F0;color:#1C1C1C"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAI()}"
+      oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+    <button onclick="sendAI()" style="width:36px;height:36px;border-radius:50%;background:#1A3A2A;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+    </button>
+  </div>
+</div>
 
-@app.route("/agenda/actualizar", methods=["POST"])
-@login_req
-def agenda_actualizar():
-    venc_id = request.form.get("venc_id", "").strip()
-    mes = int(request.form.get("mes", datetime.now().month))
-    anio = int(request.form.get("anio", datetime.now().year))
-    estado = request.form.get("estado", "pendiente")
-    nota = request.form.get("nota", "").strip()
+<style>
+.qbtn{background:#F0EDE8;border:1px solid #E4DDD0;border-radius:20px;padding:4px 10px;font-size:.73rem;cursor:pointer;color:#1A3A2A;font-family:'DM Sans',sans-serif}
+.qbtn:hover{background:#E4DDD0}
+.amsg{background:#fff;border-radius:4px 14px 14px 14px;padding:11px 13px;font-size:.83rem;color:#1C1C1C;max-width:90%;line-height:1.6;box-shadow:0 1px 4px rgba(0,0,0,0.06);white-space:pre-wrap}
+.umsg{background:#1A3A2A;color:#fff;border-radius:14px 4px 14px 14px;padding:10px 13px;font-size:.83rem;max-width:90%;align-self:flex-end;margin-left:auto;line-height:1.55}
+.extbtn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;margin-right:5px;padding:5px 11px;border-radius:20px;font-size:.75rem;font-weight:600;cursor:pointer;border:none;text-decoration:none}
+.btn-google{background:#4285F4;color:#fff}
+.btn-afip{background:#0055a5;color:#fff}
+.btn-rentas{background:#1A3A2A;color:#fff}
+</style>
 
-    # Validar que el venc_id sea uno conocido
-    ids_validos = {v["id"] for v in VENCIMIENTOS_IMPOSITIVOS}
-    if venc_id not in ids_validos:
-        return redirect(f"/agenda?mes={mes}&anio={anio}")
+<script>
+var aiAbierto = false;
 
-    conn = conectar(); c = conn.cursor()
-    c.execute("""INSERT INTO agenda_vencimientos(vencimiento_id, mes, anio, estado, nota, usuario, fecha_actualizacion)
-                 VALUES(%s,%s,%s,%s,%s,%s,%s)
-                 ON CONFLICT(vencimiento_id, mes, anio)
-                 DO UPDATE SET estado=%s, nota=%s, usuario=%s, fecha_actualizacion=%s""",
-              (venc_id, mes, anio, estado, nota, session.get("display",""), now_ar(),
-               estado, nota, session.get("display",""), now_ar()))
-    conn.commit(); conn.close()
+var RESP = {
+  // ── SISTEMA ──
+  "pago": {
+    txt: "Para registrar un pago:\n1. Andá a Clientes\n2. Buscá el cliente → tocá 📋 Cuenta\n3. En la fila del período → tocá 💳 Pagar\n4. Ingresá monto, medio de pago y si hay factura ARCA\n5. Tocá Confirmar Pago ✓",
+    links: []
+  },
+  "caja": {
+    txt: "Para cerrar la caja del día:\n1. Menú → Caja\n2. Revisá el resumen de cobros del día\n3. Tocá 🔒 Cerrar Caja Hoy\n4. Confirmá\n\nQueda registrado con tu usuario, fecha y hora.",
+    links: []
+  },
+  "cliente": {
+    txt: "Para agregar un cliente:\n1. Andá a Clientes\n2. Completá: nombre, CUIT, teléfono, email y honorarios\n3. Tocá Guardar Cliente\n\nEl sistema le crea automáticamente la cuenta del mes actual.",
+    links: []
+  },
+  "recibo": {
+    txt: "Para generar un recibo PDF:\n1. Andá a la cuenta del cliente\n2. En el período → tocá 📄 Ver para verlo en pantalla\n3. O tocá ⬇ PDF para descargarlo\n\nEl recibo incluye QR con datos de transferencia.",
+    links: []
+  },
+  "deudor": {
+    txt: "Para ver los deudores:\n1. Menú → Deudores\n\nVes la lista completa con el monto de cada uno. Podés enviar WhatsApp directo desde ahí con el mensaje de cobro ya redactado.",
+    links: []
+  },
+  "gasto": {
+    txt: "Para registrar un gasto:\n1. Menú → Gastos\n2. Elegí categoría, monto y descripción\n3. Tocá Registrar Gasto\n\nLos gastos se descuentan del rendimiento real en el panel.",
+    links: []
+  },
+  "usuario": {
+    txt: "Para crear un usuario (solo admin):\n1. Menú → Usuarios\n2. Completá nombre, usuario, contraseña y rol\n3. Tocá Crear Usuario\n\nRol Secretaria: ve clientes, pagos, caja y agenda.\nRol Admin: acceso completo.",
+    links: []
+  },
+  "agenda": {
+    txt: "La agenda de vencimientos está en Menú → Agenda.\n\nAhí podés ver todos los vencimientos del mes y actualizar el estado de cada uno:\n📝 En borrador → ✅ Presentado\n\nTambién podés agregar notas de avance.",
+    links: []
+  },
+  "whatsapp": {
+    txt: "Para enviar WhatsApp a un deudor:\n1. Menú → Deudores\n2. En la fila del cliente → tocá 📱 WA\n\nSe abre WhatsApp con el mensaje ya redactado incluyendo el monto y los datos bancarios del estudio.",
+    links: []
+  },
+  "secretaria": {
+    txt: "Las secretarias pueden:\n✓ Ver y agregar clientes\n✓ Registrar pagos\n✓ Ver deudores\n✓ Registrar gastos\n✓ Caja diaria\n✓ Agenda de vencimientos\n\nNo tienen acceso a: panel financiero, reportes ni usuarios.",
+    links: []
+  },
 
-    # Encontrar nombre del vencimiento para auditoría
-    nombre_v = next((v["nombre"] for v in VENCIMIENTOS_IMPOSITIVOS if v["id"]==venc_id), venc_id)
-    registrar_auditoria("AGENDA ACTUALIZADA", f"{nombre_v} → {estado} | {nota}" if nota else f"{nombre_v} → {estado}")
+  // ── CONTABLES / IMPOSITIVOS → redirigen a AFIP o Google ──
+  "iva": {
+    txt: "Para presentar la declaración jurada de IVA necesitás el aplicativo SIAP o usar el servicio web de AFIP. Te llevo directo a la información oficial:",
+    links: [
+      {label:"🏛 IVA en AFIP", url:"https://www.afip.gob.ar/iva/", cls:"btn-afip"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=como+presentar+declaracion+jurada+IVA+AFIP+Argentina", cls:"btn-google"}
+    ]
+  },
+  "ddjj": {
+    txt: "Para presentar declaraciones juradas en AFIP podés usar el portal web o el aplicativo SIAP. Te llevo a la información oficial:",
+    links: [
+      {label:"🏛 Declaraciones en AFIP", url:"https://www.afip.gob.ar/declaraciones/", cls:"btn-afip"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=como+presentar+declaracion+jurada+AFIP+Argentina+paso+a+paso", cls:"btn-google"}
+    ]
+  },
+  "monotributo": {
+    txt: "Para consultas sobre Monotributo, recategorización y pagos te llevo directo a AFIP:",
+    links: [
+      {label:"🏛 Monotributo AFIP", url:"https://www.afip.gob.ar/monotributo/", cls:"btn-afip"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=monotributo+recategorizacion+2025+AFIP+Argentina", cls:"btn-google"}
+    ]
+  },
+  "iibb": {
+    txt: "Para Ingresos Brutos de Santiago del Estero, los trámites se gestionan en la Dirección General de Rentas provincial:",
+    links: [
+      {label:"🏛 Rentas Sgo. del Estero", url:"https://www.rentas.sde.gov.ar", cls:"btn-rentas"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=ingresos+brutos+Santiago+del+Estero+vencimientos+2025", cls:"btn-google"}
+    ]
+  },
+  "ganancias": {
+    txt: "Para consultas sobre el impuesto a las Ganancias, anticipos y deducciones:",
+    links: [
+      {label:"🏛 Ganancias en AFIP", url:"https://www.afip.gob.ar/gananciasybienes/", cls:"btn-afip"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=impuesto+ganancias+anticipos+AFIP+Argentina+2025", cls:"btn-google"}
+    ]
+  },
+  "aportes": {
+    txt: "Para aportes y contribuciones (F.931) y empleados en relación de dependencia:",
+    links: [
+      {label:"🏛 SUSS / F.931 en AFIP", url:"https://www.afip.gob.ar/suss/", cls:"btn-afip"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=formulario+931+aportes+contribuciones+AFIP+como+presentar", cls:"btn-google"}
+    ]
+  },
+  "factura": {
+    txt: "Para emitir facturas electrónicas usás el portal ARCA (antes AFIP):",
+    links: [
+      {label:"🧾 Ir a ARCA / Facturación", url:"https://www.afip.gob.ar/facturacion/", cls:"btn-afip"},
+      {label:"🔍 Cómo facturar en ARCA", url:"https://www.google.com/search?q=como+emitir+factura+electronica+ARCA+AFIP+2025", cls:"btn-google"}
+    ]
+  },
+  "vencimiento": {
+    txt: "Para ver el calendario completo de vencimientos impositivos de AFIP:",
+    links: [
+      {label:"🏛 Vencimientos AFIP", url:"https://www.afip.gob.ar/institucional/estudios/vencimientos.asp", cls:"btn-afip"},
+      {label:"📅 Ver Agenda del estudio", url:"/agenda", cls:"btn-rentas"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=vencimientos+AFIP+2025+calendario+impositivo", cls:"btn-google"}
+    ]
+  },
+  "bienes": {
+    txt: "Para consultas sobre Bienes Personales y sus declaraciones:",
+    links: [
+      {label:"🏛 Bienes Personales AFIP", url:"https://www.afip.gob.ar/gananciasybienes/", cls:"btn-afip"},
+      {label:"🔍 Buscar en Google", url:"https://www.google.com/search?q=bienes+personales+declaracion+jurada+AFIP+2025", cls:"btn-google"}
+    ]
+  }
+};
 
-    return redirect(f"/agenda?mes={mes}&anio={anio}")
+function classify(q) {
+  q = q.toLowerCase();
+  if(/pago|cobr|registr.*pago|cómo.*pago/.test(q)) return "pago";
+  if(/caja|cerrar.*caja|cierre/.test(q)) return "caja";
+  if(/cliente|agreg|nuevo.*cliente/.test(q)) return "cliente";
+  if(/recibo|pdf|comprobante/.test(q)) return "recibo";
+  if(/deudor|deuda|debe/.test(q)) return "deudor";
+  if(/gasto|egreso/.test(q)) return "gasto";
+  if(/usuario|secretaria|permiso|rol/.test(q)) return "usuario";
+  if(/agenda|vencimiento.*agenda/.test(q)) return "agenda";
+  if(/whatsapp|wa|mensaje/.test(q)) return "whatsapp";
+  if(/iva|valor agregado/.test(q)) return "iva";
+  if(/ddjj|declaraci|jurada/.test(q)) return "ddjj";
+  if(/monotributo|monotrib|recategor/.test(q)) return "monotributo";
+  if(/ingresos brutos|iibb|brutos/.test(q)) return "iibb";
+  if(/ganancia/.test(q)) return "ganancias";
+  if(/aporte|contribuci|f\.?931|suss|empleado|sueldo/.test(q)) return "aportes";
+  if(/factur|arca|comprobante electr/.test(q)) return "factura";
+  if(/vencimiento|vence|fecha.*imp/.test(q)) return "vencimiento";
+  if(/bien.*personal|bienes/.test(q)) return "bienes";
+  if(/secretaria|qué puedo|mis permisos/.test(q)) return "secretaria";
+  return null;
+}
 
+function addMsg(txt, tipo, links) {
+  var box = document.getElementById('ai-msgs');
+  var d = document.createElement('div');
+  d.className = tipo === 'user' ? 'umsg' : 'amsg';
+  d.textContent = txt;
+  if(links && links.length) {
+    var ldiv = document.createElement('div');
+    links.forEach(function(l) {
+      var a = document.createElement('a');
+      a.href = l.url;
+      a.textContent = l.label;
+      a.className = 'extbtn ' + l.cls;
+      if(!l.url.startsWith('/')) a.target = '_blank';
+      ldiv.appendChild(a);
+    });
+    d.appendChild(ldiv);
+  }
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
 
-# ─────────────────────────────────────────────────────
-# PASO 4: Agregar "Agenda" al menú de navegación
-# En nav_html(), modificar links_admin así:
-# ─────────────────────────────────────────────────────
+function sendQ(q) {
+  document.getElementById('ai-input').value = q;
+  sendAI();
+}
 
-# links_admin = [
-#     ("/panel","Panel"),
-#     ("/clientes","Clientes"),
-#     ("/deudas","Deudores"),
-#     ("/gastos","Gastos"),
-#     ("/caja","Caja"),
-#     ("/reportes","Reportes"),
-#     ("/agenda","Agenda"),       ← AGREGAR ESTA LÍNEA
-#     ("/usuarios","Usuarios")
-# ]
+function sendAI() {
+  var inp = document.getElementById('ai-input');
+  var q = inp.value.trim();
+  if(!q) return;
+  inp.value = ''; inp.style.height = 'auto';
+  addMsg(q, 'user', null);
 
-# ─────────────────────────────────────────────────────
-# PASO 5 (opcional): Agregar Agenda también al menú de secretarias
-# ─────────────────────────────────────────────────────
+  var key = classify(q);
+  setTimeout(function() {
+    if(key && RESP[key]) {
+      addMsg(RESP[key].txt, 'bot', RESP[key].links);
+    } else {
+      addMsg('No tengo esa respuesta guardada. Te abro Google para que puedas buscar:', 'bot', [
+        {label:'🔍 Buscar en Google', url:'https://www.google.com/search?q='+encodeURIComponent(q+' Argentina contable impositivo'), cls:'btn-google'},
+        {label:'🏛 Ir a AFIP', url:'https://www.afip.gob.ar', cls:'btn-afip'}
+      ]);
+    }
+  }, 500);
+}
 
-# links_sec = [
-#     ("/clientes","Clientes"),
-#     ("/deudas","Deudores"),
-#     ("/gastos","Gastos"),
-#     ("/caja","Caja"),
-#     ("/agenda","Agenda"),       ← AGREGAR ESTA LÍNEA
-# ]
+function toggleChat() {
+  aiAbierto = !aiAbierto;
+  var p = document.getElementById('ai-panel');
+  p.style.display = aiAbierto ? 'flex' : 'none';
+  if(aiAbierto) setTimeout(function(){ document.getElementById('ai-input').focus(); }, 100);
+}
+</script>
+"""
+    return f'<nav><span class="brand">✦ Estudio Carlon</span><div class="nav-links">{items}</div><div class="user-pill">👤 {disp} {badge}</div></nav>{asistente_widget}'
