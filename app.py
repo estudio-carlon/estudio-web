@@ -438,14 +438,74 @@ def admin_req(f):
 def conectar(): return psycopg2.connect(DB_URL)
 
 def init_db():
-    conn=conectar();c=conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS usuarios(id SERIAL PRIMARY KEY,usuario TEXT UNIQUE,clave TEXT,rol TEXT DEFAULT 'secretaria',nombre_display TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS clientes(id SERIAL PRIMARY KEY,nombre TEXT,cuit TEXT,telefono TEXT,email TEXT,abono REAL DEFAULT 0)")
-    c.execute("CREATE TABLE IF NOT EXISTS cuentas(id SERIAL PRIMARY KEY,cliente_id INTEGER,periodo TEXT,debe REAL DEFAULT 0,haber REAL DEFAULT 0)")
-    c.execute("CREATE TABLE IF NOT EXISTS pagos(id SERIAL PRIMARY KEY,cliente_id INTEGER,periodo TEXT,monto REAL,medio TEXT,observaciones TEXT,facturado BOOLEAN DEFAULT FALSE,fecha TEXT,usuario TEXT,emitido_por TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS gastos(id SERIAL PRIMARY KEY,fecha TEXT,categoria TEXT,descripcion TEXT,monto REAL,usuario TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS auditoria(id SERIAL PRIMARY KEY,fecha TEXT,usuario TEXT,accion TEXT,detalle TEXT,cliente_id INTEGER,cliente_nombre TEXT)")
-    c.execute("""CREATE TABLE IF NOT EXISTS cierres_caja(
+    conn = conectar()
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios(
+        id SERIAL PRIMARY KEY,
+        usuario TEXT UNIQUE,
+        clave TEXT,
+        rol TEXT DEFAULT 'secretaria',
+        nombre_display TEXT
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS clientes(
+        id SERIAL PRIMARY KEY,
+        nombre TEXT,
+        cuit TEXT,
+        telefono TEXT,
+        email TEXT,
+        abono REAL DEFAULT 0
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cuentas(
+        id SERIAL PRIMARY KEY,
+        cliente_id INTEGER,
+        periodo TEXT,
+        debe REAL DEFAULT 0,
+        haber REAL DEFAULT 0
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS pagos(
+        id SERIAL PRIMARY KEY,
+        cliente_id INTEGER,
+        periodo TEXT,
+        monto REAL,
+        medio TEXT,
+        observaciones TEXT,
+        facturado BOOLEAN DEFAULT FALSE,
+        fecha TEXT,
+        usuario TEXT,
+        emitido_por TEXT
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS gastos(
+        id SERIAL PRIMARY KEY,
+        fecha TEXT,
+        categoria TEXT,
+        descripcion TEXT,
+        monto REAL,
+        usuario TEXT
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS auditoria(
+        id SERIAL PRIMARY KEY,
+        fecha TEXT,
+        usuario TEXT,
+        accion TEXT,
+        detalle TEXT,
+        cliente_id INTEGER,
+        cliente_nombre TEXT
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cierres_caja(
         id SERIAL PRIMARY KEY,
         fecha TEXT,
         usuario TEXT,
@@ -461,8 +521,9 @@ def init_db():
         cerrado BOOLEAN DEFAULT FALSE,
         hora_cierre TEXT
     )""")
-INIT_AGENDA_SQL = """
-    c.execute('''CREATE TABLE IF NOT EXISTS agenda_vencimientos(
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS agenda_vencimientos(
         id SERIAL PRIMARY KEY,
         vencimiento_id TEXT,
         mes INTEGER,
@@ -472,11 +533,11 @@ INIT_AGENDA_SQL = """
         usuario TEXT,
         fecha_actualizacion TEXT,
         UNIQUE(vencimiento_id, mes, anio)
-    )''')
-"""
-  conn.commit();conn.close()
+    )""")
 
-def actualizar_db():
+    conn.commit()
+    conn.close()
+  def actualizar_db():
     conn=conectar();c=conn.cursor()
     for ddl in ["ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email TEXT","ALTER TABLE clientes ADD COLUMN IF NOT EXISTS abono REAL DEFAULT 0","ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre_display TEXT","ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol TEXT DEFAULT 'secretaria'","ALTER TABLE auditoria ADD COLUMN IF NOT EXISTS cliente_nombre TEXT","ALTER TABLE pagos ADD COLUMN IF NOT EXISTS observaciones TEXT","ALTER TABLE pagos ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT FALSE","ALTER TABLE pagos ADD COLUMN IF NOT EXISTS emitido_por TEXT"]:
         try: c.execute(ddl)
@@ -601,7 +662,7 @@ def panel():
     gcat_labels = [r[0] for r in gastos_cat]
     gcat_data   = [float(r[1]) for r in gastos_cat]
 
-  VENCIMIENTOS_IMPOSITIVOS = [
+VENCIMIENTOS_IMPOSITIVOS = [
     {"id": "ib_cat_a",   "nombre": "Ingresos Brutos — Categoría A",   "dia": 18, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría A · Ingresos Brutos · vence el 18 de cada mes"},
     {"id": "ib_cat_b",   "nombre": "Ingresos Brutos — Categoría B",   "dia": 15, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría B · Ingresos Brutos · vence el 15 de cada mes"},
     {"id": "iva_ddjj",   "nombre": "IVA — Declaración Jurada (F.731)","dia": 20, "tipo": "AFIP",                  "detalle": "Formulario 731 / SIAP · presentación mensual · fecha según CUIT"},
