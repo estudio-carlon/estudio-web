@@ -1448,4 +1448,3 @@ function toggleChat() {
 </script>
 """
     return f'<nav><span class="brand">✦ Estudio Carlon</span><div class="nav-links">{items}</div><div class="user-pill">👤 {disp} {badge}</div></nav>{asistente_widget}'
-
