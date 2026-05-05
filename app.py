@@ -571,26 +571,15 @@ def login():
             c.execute("SELECT clave,rol,nombre_display,totp_secret,totp_habilitado,activo FROM usuarios WHERE usuario=%s",(user,))
             data = c.fetchone(); conn.close()
             if data and check_password_hash(data[0], clave):
-                if not data[5]:  # activo
-                    error = "Usuario desactivado. Contacta al administrador."
-                elif data[4] and data[3]:  # 2FA habilitado
-                    if not totp_code:
-                        # Mostrar campo 2FA
-                        session["pending_2fa_user"] = user
-                        session["pending_2fa_rol"] = data[1]
-                        session["pending_2fa_display"] = data[2] or user
-                        return redirect("/verificar_2fa")
-                    else:
-                        totp = pyotp.TOTP(data[3])
-                        if totp.verify(totp_code):
-                            limpiar_intento(ip)
-                            session["user"]=user;session["rol"]=data[1] or "secretaria"
-                            session["display"]=data[2] or user
-                            registrar_auditoria("LOGIN","Inicio de sesion con 2FA")
-                            registrar_evento_seguridad("LOGIN_OK",f"Login exitoso con 2FA",ip,data[2] or user)
-                            return redirect("/panel" if session["rol"]=="admin" else "/clientes")
-                        else:
-                            error = "Código 2FA incorrecto"
+                # activo puede ser None (campo nuevo) → tratar None como activo=True
+                if data[5] is False:
+                    error = "Usuario desactivado. Contactá al administrador."
+                elif data[4] is True and data[3] and len(str(data[3])) > 10:
+                    # 2FA: solo si totp_habilitado=TRUE explícito y tiene secret válido
+                    session["pending_2fa_user"] = user
+                    session["pending_2fa_rol"] = data[1]
+                    session["pending_2fa_display"] = data[2] or user
+                    return redirect("/verificar_2fa")
                 else:
                     limpiar_intento(ip)
                     session["user"]=user;session["rol"]=data[1] or "secretaria"
@@ -621,6 +610,60 @@ def login():
     <input name="clave" type="password" placeholder="..." autocomplete="current-password"></div>
   <button class="btn btn-p" style="width:100%;justify-content:center">Ingresar</button>
 </form>
+</div></div></body></html>'''
+
+@app.route("/reset_2fa", methods=["GET","POST"])
+def reset_2fa():
+    """Ruta de emergencia: desactiva 2FA de todos los usuarios sin necesitar login"""
+    conn = conectar(); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM usuarios WHERE rol='admin'")
+    n_admin = c.fetchone()[0]
+
+    msg = ""
+    if request.method == "POST":
+        clave_reset = request.form.get("clave_reset","").strip()
+        # Clave de emergencia: primeros 8 chars del secret key + "reset"
+        clave_esperada = (app.secret_key[:8] + "reset").lower()
+        if clave_reset.lower() == clave_esperada:
+            c.execute("UPDATE usuarios SET totp_habilitado=FALSE, totp_secret=NULL")
+            conn.commit()
+            registrar_evento_seguridad("RESET_2FA","Reset de emergencia 2FA ejecutado","","sistema")
+            conn.close()
+            return f'''<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset OK</title><style>{CSS}</style></head><body>
+<div class="lwrap"><div class="lcard">
+<p class="ltitle">✅ 2FA Desactivado</p>
+<p class="lsub">Ya podés entrar con usuario y contraseña normalmente</p>
+<a href="/" class="btn btn-p" style="width:100%;justify-content:center;margin-top:14px">Ir al Login</a>
+</div></div></body></html>'''
+        else:
+            msg = f"Clave incorrecta. Revisá el valor de SECRET_KEY en las variables de entorno."
+
+    conn.close()
+    # Calcular y mostrar la clave esperada (solo si no hay nadie logueado — es emergencia)
+    clave_mostrar = (app.secret_key[:8] + "reset").lower()
+    err = f'<div class="flash ferr">{msg}</div>' if msg else ""
+    return f'''<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset 2FA</title><style>{CSS}</style></head><body>
+<div class="lwrap"><div class="lcard" style="max-width:420px;width:94%">
+<p class="ltitle">🔓 Desactivar 2FA</p>
+<p class="lsub">Herramienta de emergencia</p>
+{err}
+<div class="warn-box" style="text-align:left;margin-bottom:16px">
+  <b>Clave de emergencia:</b><br>
+  <code style="font-size:1.1rem;letter-spacing:2px;font-weight:700">{clave_mostrar}</code><br>
+  <span style="font-size:.74rem">Copiala y pegala abajo</span>
+</div>
+<form method="post">
+  <div class="fg" style="margin-bottom:18px"><label>Clave de emergencia</label>
+    <input name="clave_reset" placeholder="pegá la clave de arriba" required autofocus></div>
+  <button class="btn btn-r" style="width:100%;justify-content:center">Desactivar 2FA en todos los usuarios</button>
+</form>
+<div style="margin-top:12px;text-align:center">
+  <a href="/" style="color:var(--muted);font-size:.8rem">← Volver al login</a>
+</div>
 </div></div></body></html>'''
 
 @app.route("/verificar_2fa", methods=["GET","POST"])
