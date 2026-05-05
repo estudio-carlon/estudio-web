@@ -1516,9 +1516,9 @@ def clientes():
           </div></td>
         </tr>'''
 
-    btn_wa_masivo='<a href="/wa_facturas_preview" class="btn btn-wa btn-sm">📱 WA Fin de Mes</a>' if es_admin else ""
+    btn_wa_masivo='<a href="/wa_facturas_preview" class="btn btn-wa btn-sm">📱 WA Clientes</a>'
     cond_opts="".join(f'<option value="{cf}">{cf}</option>' for cf in CONDICIONES_FISCALES)
-    modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM('mb')">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
+    modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM(&apos;mb&apos;)">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
     n_ri=sum(1 for d in data_raw if d[8])
     n_wa=sum(1 for d in data_raw if d[9])
     body=f"""
@@ -1572,20 +1572,196 @@ def clientes():
 def editar_cliente(id):
     conn=conectar();c=conn.cursor()
     if request.method=="POST":
-        c.execute("SELECT nombre,cuit,telefono,email,abono FROM clientes WHERE id=%s",(id,))
-        antes=c.fetchone()
-        nombre=request.form.get("nombre","").strip();cuit=request.form.get("cuit","").strip()
-        tel=request.form.get("telefono","").strip();email=request.form.get("email","").strip();abono=request.form.get("abono",0) or 0
-        c.execute("UPDATE clientes SET nombre=%s,cuit=%s,telefono=%s,email=%s,abono=%s WHERE id=%s",
-                  (nombre,enc(cuit),enc(tel),enc(email),abono,id))
+        nombre=request.form.get("nombre","").strip()
+        cuit=request.form.get("cuit","").strip()
+        tel=request.form.get("telefono","").strip()
+        email=request.form.get("email","").strip()
+        abono=request.form.get("abono",0) or 0
+        condicion=request.form.get("condicion_fiscal","Responsable Inscripto")
+        actividad=request.form.get("actividad","").strip()
+        ri = condicion == "Responsable Inscripto"
+        wa_fact = request.form.get("envio_wa_facturas","0")=="1"
+        c.execute("""UPDATE clientes SET nombre=%s,cuit=%s,telefono=%s,email=%s,abono=%s,
+                     condicion_fiscal=%s,actividad=%s,responsable_inscripto=%s,envio_wa_facturas=%s
+                     WHERE id=%s""",
+                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,id))
         conn.commit()
-        registrar_auditoria("EDICION CLIENTE",f"Actualizado {nombre}",id,nombre)
+        registrar_auditoria("EDICION CLIENTE",f"Actualizado {nombre} | {condicion}",id,nombre)
         conn.close();return redirect("/clientes")
-    c.execute("SELECT id,nombre,cuit,telefono,email,abono FROM clientes WHERE id=%s",(id,))
+    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes WHERE id=%s",(id,))
     d=c.fetchone();conn.close()
+    if not d: return redirect("/clientes")
     cuit_d=dec(d[2]);tel_d=dec(d[3]);email_d=dec(d[4])
-    body=f'<a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">← Volver</a><h1 class="page-title">Editar Cliente</h1><p class="page-sub">{d[1]}</p><div class="fcard"><form method="post"><div class="fgrid"><div class="fg"><label>Nombre</label><input name="nombre" value="{d[1] or ""}" required></div><div class="fg"><label>CUIT</label><input name="cuit" value="{cuit_d or ""}"></div><div class="fg"><label>Teléfono</label><input name="telefono" value="{tel_d or ""}"></div><div class="fg"><label>Email</label><input name="email" type="email" value="{email_d or ""}"></div><div class="fg"><label>Honorarios $</label><input name="abono" type="number" value="{d[5] or 0}"></div></div><div style="display:flex;gap:8px"><button class="btn btn-p">Guardar</button><a href="/clientes" class="btn btn-o">Cancelar</a></div></form></div>'
+    condicion=d[6] or "Responsable Inscripto";actividad=d[7] or "";ri=d[8];wa_f=d[9]
+    cuit_limpio=(cuit_d or "").replace("-","").replace(" ","")
+    cond_opts="".join(f'<option value="{cf}" {"selected" if cf==condicion else ""}>{cf}</option>' for cf in CONDICIONES_FISCALES)
+    wa_checked="checked" if wa_f else ""
+    body=f"""
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">← Volver a Clientes</a>
+    <h1 class="page-title">Editar Cliente</h1>
+    <p class="page-sub">{d[1]}</p>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      {"<a href=\'https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit="+cuit_limpio+"\' target=\'_blank\' class=\'btn btn-arca btn-sm\'>🔍 Constancia ARCA</a>" if cuit_limpio else ""}
+      {"<a href=\'http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit="+cuit_limpio+"\' target=\'_blank\' class=\'btn btn-sm\' style=\'background:#6a1b9a;color:#fff\'>🔍 Constancia IIBB</a>" if cuit_limpio else ""}
+    </div>
+    <div class="fcard"><form method="post">
+      <div class="fgrid">
+        <div class="fg"><label>Nombre / Razón Social</label><input name="nombre" value="{d[1] or ""}" required></div>
+        <div class="fg"><label>CUIT</label><input name="cuit" value="{cuit_d or ""}"></div>
+        <div class="fg"><label>Condición Fiscal</label><select name="condicion_fiscal">{cond_opts}</select></div>
+        <div class="fg"><label>Actividad Principal</label><input name="actividad" value="{actividad}" placeholder="Ej: Comercio minorista ropa"></div>
+        <div class="fg"><label>Teléfono WhatsApp</label><input name="telefono" value="{tel_d or ""}"></div>
+        <div class="fg"><label>Email</label><input name="email" type="email" value="{email_d or ""}"></div>
+        <div class="fg"><label>Honorarios $ / mes</label><input name="abono" type="number" value="{d[5] or 0}"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+        <input type="checkbox" name="envio_wa_facturas" value="1" id="wa-chk" {wa_checked} style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="wa-chk">📱 Enviar recordatorio WA de facturas a fin de mes</label>
+      </div>
+      <div style="display:flex;gap:8px"><button class="btn btn-p">Guardar Cambios</button><a href="/clientes" class="btn btn-o">Cancelar</a></div>
+    </form></div>"""
     return page(f"Editar - {d[1]}",body,"Clientes")
+
+@app.route("/wa_facturas_preview", methods=["GET","POST"])
+@login_req
+def wa_facturas_preview():
+    conn=conectar();c=conn.cursor()
+    # Tipo: facturas (recordatorio compras) o cobro (recordatorio pago)
+    tipo = request.args.get("tipo","facturas")
+    c.execute("""SELECT id,nombre,telefono,condicion_fiscal,actividad,abono
+                 FROM clientes WHERE telefono IS NOT NULL AND telefono != ''
+                 ORDER BY nombre""")
+    todos=c.fetchall()
+    # Para facturas: solo los que tienen WA activo
+    # Para cobro: todos los que tienen deuda
+    if tipo=="facturas":
+        c.execute("""SELECT id FROM clientes WHERE envio_wa_facturas=TRUE""")
+        ids_wa={r[0] for r in c.fetchall()}
+        data=[d for d in todos if d[0] in ids_wa]
+    else:
+        c.execute("""SELECT cl.id,SUM(cu.debe-cu.haber) d FROM cuentas cu
+                     JOIN clientes cl ON cl.id=cu.cliente_id
+                     GROUP BY cl.id HAVING SUM(cu.debe-cu.haber)>0""")
+        ids_deuda={r[0]:r[1] for r in c.fetchall()}
+        data=[d for d in todos if d[0] in ids_deuda]
+    conn.close()
+
+    hoy=datetime.now()
+    mes_nombre=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto",
+                "Septiembre","Octubre","Noviembre","Diciembre"][hoy.month]
+    flash=""
+
+    if request.method=="POST" and request.form.get("accion")=="enviar_todos":
+        if not CALLMEBOT_APIKEY:
+            flash='<div class="flash ferr">⚠️ No está configurada la clave CallMeBot. Configurala en las variables de entorno de Render.</div>'
+        else:
+            enviados=0;errores=[]
+            for d in data:
+                cid,nombre,tel_enc,condicion,actividad,abono=d
+                tel_d=(dec(tel_enc) or "").replace(" ","").replace("-","").replace("+","").strip()
+                if not tel_d: continue
+                num=f"54{tel_d}" if not tel_d.startswith("54") else tel_d
+                nombre_c=nombre.split()[0] if nombre else "estimado/a"
+                if tipo=="facturas":
+                    msg=(f"Hola {nombre_c}! 👋\n\n"
+                         f"Le recordamos que estamos a fin de {mes_nombre}. 📅\n\n"
+                         f"📂 *Por favor envienos sus facturas de compras* para poder "
+                         f"realizar correctamente su declaración impositiva.\n\n"
+                         f"Puede enviarnos las facturas por este WhatsApp o al mail del estudio.\n\n"
+                         f"Muchas gracias! 🙏\n— *Estudio Contable Carlon*")
+                else:
+                    saldo=ids_deuda.get(cid,0)
+                    msg=(f"Hola {nombre_c}! 👋\n\n"
+                         f"Le informamos que registra un saldo pendiente de *{fmt(saldo)}* "
+                         f"en concepto de honorarios profesionales.\n\n"
+                         f"Para regularizar puede transferir a:\n"
+                         f"🏦 Banco Nación\n"
+                         f"CBU: 0110420630042013452529\n"
+                         f"Alias: ESTUDIO.CONTA.CARLON\n"
+                         f"Titular: Alexis Natasha Carlon\n\n"
+                         f"Ante cualquier consulta estamos a su disposición.\n"
+                         f"— *Estudio Contable Carlon*")
+                try:
+                    url=f"https://api.callmebot.com/whatsapp.php?phone={num}&text={urllib.parse.quote(msg)}&apikey={CALLMEBOT_APIKEY}"
+                    req2=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
+                    urllib.request.urlopen(req2,timeout=6)
+                    enviados+=1; time.sleep(0.6)
+                except Exception as ex:
+                    errores.append(nombre)
+            tipo_lbl="Recordatorio facturas" if tipo=="facturas" else "Recordatorio cobro"
+            registrar_auditoria("WA_MASIVO",f"{tipo_lbl} {mes_nombre}: {enviados} enviados")
+            err_txt=f" · Errores: {', '.join(errores[:5])}" if errores else ""
+            flash=f'<div class="flash fok">✅ {enviados} mensajes enviados{err_txt}</div>'
+
+    # Build preview cards
+    filas=""
+    for d in data:
+        cid,nombre,tel_enc,condicion,actividad,abono=d
+        tel_d=dec(tel_enc) if tel_enc else "---"
+        tel_limpio=(tel_d or "").replace(" ","").replace("-","")
+        nombre_c=nombre.split()[0] if nombre else "estimado/a"
+        saldo=ids_deuda.get(cid,0) if tipo=="cobro" else 0
+
+        if tipo=="facturas":
+            msg_prev=(f"Hola {nombre_c}! 👋 Le recordamos que estamos a fin de {mes_nombre}. "
+                      f"Por favor envienos sus facturas de compras para la declaración impositiva. "
+                      f"Muchas gracias! — Estudio Contable Carlon")
+        else:
+            msg_prev=(f"Hola {nombre_c}! Registra saldo pendiente de {fmt(saldo)} por honorarios. "
+                      f"Puede transferir al CBU 0110420630042013452529 Alias ESTUDIO.CONTA.CARLON. "
+                      f"Muchas gracias! — Estudio Contable Carlon")
+
+        wa_link=(f"https://wa.me/54{tel_limpio}?text={urllib.parse.quote(msg_prev)}"
+                 if tel_limpio and tel_d!="---" else "#")
+
+        saldo_badge=f'<span style="color:var(--danger);font-weight:700">{fmt(saldo)}</span>' if saldo>0 else ""
+        filas+=f'''<div class="arow">
+          <div>
+            <span style="font-weight:600;color:var(--primary)">{nombre}</span>
+            {saldo_badge}
+            <span class="bmedio" style="margin-left:4px">{condicion or "---"}</span><br>
+            <span style="font-size:.75rem;color:var(--muted)">📱 {tel_d}</span>
+          </div>
+          <a href="{wa_link}" target="_blank" class="btn btn-wa btn-sm">📱 Enviar</a>
+        </div>'''
+
+    tipo_lbl = "Recordatorio Facturas de Compras" if tipo=="facturas" else "Recordatorio de Cobro"
+    tipo_desc = (f"Clientes con WhatsApp habilitado — {mes_nombre} {hoy.year}"
+                 if tipo=="facturas" else "Clientes con saldo pendiente")
+    msg_ejemplo = (f"Hola [Nombre]! Le recordamos que estamos a fin de {mes_nombre}. Por favor envienos sus facturas de compras para la declaración impositiva. — Estudio Contable Carlon"
+                   if tipo=="facturas" else
+                   f"Hola [Nombre]! Registra saldo pendiente de $X por honorarios. Puede transferir al CBU 0110420630042013452529 Alias ESTUDIO.CONTA.CARLON. — Estudio Contable Carlon")
+
+    btn_masivo=""
+    if CALLMEBOT_APIKEY and data:
+        btn_masivo=f'''<div class="fcard" style="margin-bottom:16px">
+          <h3>Enviar a todos ({len(data)} clientes)</h3>
+          <form method="post">
+            <input type="hidden" name="accion" value="enviar_todos">
+            <button class="btn btn-wa" onclick="return confirm('¿Enviar WhatsApp a {len(data)} clientes?')">
+              📱 Enviar a TODOS ({len(data)})
+            </button>
+          </form>
+        </div>'''
+    elif not CALLMEBOT_APIKEY:
+        btn_masivo='<div class="warn-box">⚠️ Para el envío masivo automático configurá <b>CALLMEBOT_APIKEY</b> en Render. El envío manual (botón por cliente) funciona siempre.</div>'
+
+    body=f"""
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">← Volver a Clientes</a>
+    <h1 class="page-title">📱 {tipo_lbl}</h1>
+    <p class="page-sub">{tipo_desc}</p>
+    {flash}
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/wa_facturas_preview?tipo=facturas" class="btn {"btn-wa" if tipo=="facturas" else "btn-o"} btn-sm">📂 Facturas de compras</a>
+      <a href="/wa_facturas_preview?tipo=cobro" class="btn {"btn-wa" if tipo=="cobro" else "btn-o"} btn-sm">💰 Cobro honorarios</a>
+    </div>
+    <div class="info-box" style="margin-bottom:14px">
+      <b>Mensaje:</b> <i>"{msg_ejemplo}"</i>
+    </div>
+    {"<div class=warn-box>⚠️ No hay clientes para este tipo de mensaje.</div>" if not data else ""}
+    {btn_masivo}
+    {filas}"""
+    return page("WhatsApp", body, "Clientes")
 
 @app.route("/borrar_cliente/<int:id>")
 @admin_req
