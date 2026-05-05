@@ -1811,47 +1811,43 @@ def cuenta(id):
         if saldo<=0:
             badge='<span class="badge bp">PAGADO</span>'
         elif d[2]>0:
-            badge='<span class="badge bpar">PARCIAL - debe '+fmt(saldo)+'</span>'
+            badge='<span class="badge bpar">PARCIAL — debe '+fmt(saldo)+'</span>'
         else:
             badge='<span class="badge bd">DEBE '+fmt(saldo)+'</span>'
         pu=d[0].replace("/","-")
+        # boton pagar
         if saldo>0.5:
-            btn_p='<button onclick="abrirPago(''+d[0]+'','+str(round(saldo))+')" class="btn btn-xs btn-g">Pagar</button>'
+            bp='<button onclick="abrirPago(\"'+d[0]+'\",'+str(round(saldo))+')" class="btn btn-xs btn-g">Pagar</button>'
         else:
-            btn_p='<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
+            bp='<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
+        # boton arca
         if cuit_limpio:
-            btn_arca='<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
+            ba='<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
         else:
-            btn_arca=""
+            ba=""
+        # boton whatsapp
         if telefono and saldo>0.5:
-            btn_wa='<button onclick="abrirWA(''+d[0]+'','+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
+            bw='<button onclick="abrirWA(\"'+d[0]+'\",'+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
         else:
-            btn_wa=""
-        filas+=(
-            '<div class="arow">'
-            '<span class="period">'+d[0]+'</span>'
-            '<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'
-            +badge+
-            '<div style="display:flex;gap:5px;flex-wrap:wrap">'
-            '<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
-            '<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
-            +btn_p+btn_arca+btn_wa+
-            '</div></div>'
-        )
-        btn_arca=('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
-                  if cuit_limpio else "")
-        btn_wa=('<button onclick="abrirWA(\''  +d[0]+'\','+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
-                if telefono and saldo>0.5 else "")
-        filas+=('<div class="arow"><span class="period">'+d[0]+'</span>'
-                '<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'+badge+
-                '<div style="display:flex;gap:5px;flex-wrap:wrap">'
-                '<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
-                '<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
-                +btn_p+btn_arca+btn_wa+'</div></div>')
+            bw=""
+        filas+=('<div class="arow">'
+               +'<span class="period">'+d[0]+'</span>'
+               +'<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'
+               +badge
+               +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
+               +'<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
+               +'<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
+               +bp+ba+bw+'</div></div>')
+    hist_rows=""
     for h in historial:
-        fact_b='<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>' if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>'
+        fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
+                if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>')
         emitido=h[7] or h[1]
-        hist_rows+=f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{h[0]}</span><span class="log-user">{emitido}</span><span class="log-msg">{h[2]} · {fmt(h[3])} · {h[4]}{" · "+h[6] if h[6] else ""} {fact_b}</span></div>'
+        hist_rows+=('<div class="logrow"><div class="log-dot"></div>'
+                    +'<span class="log-time">'+h[0]+'</span>'
+                    +'<span class="log-user">'+emitido+'</span>'
+                    +'<span class="log-msg"><b>'+h[2]+'</b> · '+fmt(h[3])+' · '+h[4]
+                    +((" · "+h[6]) if h[6] else "")+' '+fact_b+'</span></div>')
     medios_opts="".join(f'<option value="{m}">{m}</option>' for m in MEDIOS_PAGO)
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">← Clientes</a>
