@@ -1794,13 +1794,6 @@ def asistente():
     except Exception as e:
         return json.dumps({"error": str(e)}), 500, {"Content-Type": "application/json"}
  
- 
-# ─────────────────────────────────────────────────────
-# PARTE 3: HTML del widget flotante
-# Reemplazar la función nav_html() existente con esta versión
-# que incluye el botón flotante y el panel del chat
-# ─────────────────────────────────────────────────────
- 
 def nav_html(active=""):
     user = session.get("user", "")
     rol = session.get("rol", "secretaria")
