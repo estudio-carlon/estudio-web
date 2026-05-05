@@ -11,7 +11,52 @@ from io import BytesIO
 app = Flask(__name__)
 app.secret_key = "estudio_carlon_secret_2025"
 app.config["PROPAGATE_EXCEPTIONS"] = True
-DB_URL = os.getenv("DB_URL")
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from datetime import timedelta
+import os
+
+# Rate limit (anti bots)
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
+
+# Config sesiones seguras
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax"
+)
+
+# Expiración de sesión
+app.permanent_session_lifetime = timedelta(minutes=30)
+
+# Control de intentos login
+login_attempts = {}
+
+# Headers de seguridad
+@app.after_request
+def secure_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+# Forzar HTTPS
+@app.before_request
+def force_https():
+    if request.headers.get("X-Forwarded-Proto") == "http":
+        return redirect(request.url.replace("http://", "https://"))
+
+# Manejo de errores (no mostrar traceback)
+@app.errorhandler(500)
+def error_500(e):
+    return "Error interno del sistema", 500
+
+# Logger básico de seguridad
+def log_security(msg):
+    print(f"[SECURITY] {msg} | IP: {request.remote_addr}")
+
+DB_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 MEDIOS_PAGO = ["Transferencia -> Natasha Carlon","Transferencia -> Maira Carlon",
