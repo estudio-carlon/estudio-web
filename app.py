@@ -451,15 +451,29 @@ def login():
     if request.method=="POST":
         user=request.form.get("usuario","").strip();clave=request.form.get("clave","")
         conn=conectar();c=conn.cursor()
+        ip = request.remote_addr
+
+if ip in login_attempts and login_attempts[ip] >= 5:
+    return "Demasiados intentos. Esperá unos minutos."
         c.execute("SELECT clave,rol,nombre_display FROM usuarios WHERE usuario=%s",(user,))
         data=c.fetchone();conn.close()
         if data and check_password_hash(data[0],clave):
-            session["user"]=user;session["rol"]=data[1] or "secretaria";session["display"]=data[2] or user
-            registrar_auditoria("LOGIN","Inicio de sesion")
-            return redirect("/panel" if session["rol"]=="admin" else "/clientes")
-        error="Usuario o contrasena incorrectos"
-    err=f'<div class="flash ferr">{error}</div>' if error else ""
-    return f'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ingresar</title><style>{CSS}</style></head><body><div class="lwrap"><div class="lcard"><p class="ltitle">Bienvenida</p><p class="lsub">Estudio Contable Carlon</p>{err}<form method="post"><div class="fg" style="margin-bottom:12px"><label>Usuario</label><input name="usuario" placeholder="tu usuario" autocomplete="username"></div><div class="fg" style="margin-bottom:18px"><label>Contrasena</label><input name="clave" type="password" placeholder="..." autocomplete="current-password"></div><button class="btn btn-p" style="width:100%;justify-content:center">Ingresar</button></form></div></div></body></html>'
+    login_attempts[ip] = 0
+    session.permanent = True
+
+    session["user"]=user
+    session["rol"]=data[1] or "secretaria"
+    session["display"]=data[2] or user
+
+    registrar_auditoria("LOGIN","Inicio de sesion")
+
+    return redirect("/panel" if session["rol"]=="admin" else "/clientes")
+
+else:
+    login_attempts[ip] = login_attempts.get(ip, 0) + 1
+    log_security(f"Login fallido usuario={user}")
+
+    error="Usuario o contraseña incorrectos"
 
 @app.route("/logout")
 def logout():
