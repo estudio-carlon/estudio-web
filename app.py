@@ -19,7 +19,17 @@ MEDIOS_PAGO = ["Transferencia → Natasha Carlon","Transferencia → Maira Carlo
                "Efectivo","Cheque","Dólares","Otro"]
 CATEGORIAS_GASTO = ["Sueldo","Luz","Internet","Tarjetas","Gastos de Oficina",
                     "Artículos de Limpieza","Papelería","Otros"]
-
+VENCIMIENTOS_IMPOSITIVOS = [
+    {"id": "ib_cat_a",   "nombre": "Ingresos Brutos — Categoría A",   "dia": 18, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría A · Ingresos Brutos · vence el 18 de cada mes"},
+    {"id": "ib_cat_b",   "nombre": "Ingresos Brutos — Categoría B",   "dia": 15, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría B · Ingresos Brutos · vence el 15 de cada mes"},
+    {"id": "iva_ddjj",   "nombre": "IVA — Declaración Jurada (F.731)","dia": 20, "tipo": "AFIP",                  "detalle": "Formulario 731 / SIAP · presentación mensual · fecha según CUIT"},
+    {"id": "f931_1",     "nombre": "Aportes y Contribuciones F.931",  "dia": 9,  "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 1ra quincena · SUSS · vence el 9"},
+    {"id": "f931_2",     "nombre": "Aportes y Contribuciones F.931",  "dia": 11, "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 2da quincena · SUSS · vence el 11"},
+    {"id": "ganancias",  "nombre": "Ganancias — Anticipo mensual",    "dia": 23, "tipo": "AFIP",                  "detalle": "Anticipo según cronograma AFIP — aproximado día 23"},
+    {"id": "monotributo","nombre": "Monotributo — Cuota mensual",     "dia": 20, "tipo": "AFIP",                  "detalle": "Cuota unificada mensual — todos los contribuyentes"},
+    {"id": "suss_ddjj",  "nombre": "SUSS — Declaración Jurada",       "dia": 9,  "tipo": "AFIP",                  "detalle": "Sistema Único de Seguridad Social · F.931 mensual"},
+    {"id": "rentas_prov","nombre": "Rentas Provinciales — Anticipo",  "dia": 20, "tipo": "Rentas SGO",            "detalle": "Dirección General de Rentas · Santiago del Estero"},
+]
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
 :root{--bg:#F7F5F0;--card:#fff;--primary:#1A3A2A;--accent:#C8A96E;--danger:#C0392B;--success:#27AE60;--warning:#E67E22;--info:#2475B0;--purple:#7B68EE;--text:#1C1C1C;--muted:#888;--border:#E4DDD0;--r:12px;--shadow:0 2px 18px rgba(0,0,0,0.07)}
@@ -435,7 +445,8 @@ def admin_req(f):
         return f(*a,**kw)
     return w
 
-def conectar(): return psycopg2.connect(DB_URL)
+def conectar():
+    return psycopg2.connect(DB_URL, sslmode="require")
 
 def init_db():
     conn = conectar()
@@ -677,25 +688,17 @@ def panel():
     gcat_labels = [r[0] for r in gastos_cat]
     gcat_data   = [float(r[1]) for r in gastos_cat]
 
-VENCIMIENTOS_IMPOSITIVOS = [
-    {"id": "ib_cat_a",   "nombre": "Ingresos Brutos — Categoría A",   "dia": 18, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría A · Ingresos Brutos · vence el 18 de cada mes"},
-    {"id": "ib_cat_b",   "nombre": "Ingresos Brutos — Categoría B",   "dia": 15, "tipo": "IIBB Sgo. del Estero", "detalle": "Categoría B · Ingresos Brutos · vence el 15 de cada mes"},
-    {"id": "iva_ddjj",   "nombre": "IVA — Declaración Jurada (F.731)","dia": 20, "tipo": "AFIP",                  "detalle": "Formulario 731 / SIAP · presentación mensual · fecha según CUIT"},
-    {"id": "f931_1",     "nombre": "Aportes y Contribuciones F.931",  "dia": 9,  "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 1ra quincena · SUSS · vence el 9"},
-    {"id": "f931_2",     "nombre": "Aportes y Contribuciones F.931",  "dia": 11, "tipo": "AFIP",                  "detalle": "Sueldos y jornales — 2da quincena · SUSS · vence el 11"},
-    {"id": "ganancias",  "nombre": "Ganancias — Anticipo mensual",    "dia": 23, "tipo": "AFIP",                  "detalle": "Anticipo según cronograma AFIP — aproximado día 23"},
-    {"id": "monotributo","nombre": "Monotributo — Cuota mensual",     "dia": 20, "tipo": "AFIP",                  "detalle": "Cuota unificada mensual — todos los contribuyentes"},
-    {"id": "suss_ddjj",  "nombre": "SUSS — Declaración Jurada",       "dia": 9,  "tipo": "AFIP",                  "detalle": "Sistema Único de Seguridad Social · F.931 mensual"},
-    {"id": "rentas_prov","nombre": "Rentas Provinciales — Anticipo",  "dia": 20, "tipo": "Rentas SGO",            "detalle": "Dirección General de Rentas · Santiago del Estero"},
-]
     # ── Gráfico 5: Rendimiento acumulado ──
-    cum_ing, cum_gas = [], []
-    si, sg = 0.0, 0.0
-    for i in range(len(ingresos_m)):
-        si += ingresos_m[i]; sg += gastos_m[i]
-        cum_ing.append(round(si)); cum_gas.append(round(sg))
+cum_ing, cum_gas = [], []
+si, sg = 0.0, 0.0
 
-    # ── Top deudores ──
+for i in range(len(ingresos_m)):
+    si += ingresos_m[i]
+    sg += gastos_m[i]
+    cum_ing.append(round(si))
+    cum_gas.append(round(sg))# ── Gráfico 5: Rendimiento acumulado ──
+    
+      # ── Top deudores ──
     c.execute("""SELECT cl.nombre, SUM(cu.debe-cu.haber) d FROM cuentas cu
                  JOIN clientes cl ON cl.id=cu.cliente_id
                  GROUP BY cl.nombre HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC LIMIT 6""")
