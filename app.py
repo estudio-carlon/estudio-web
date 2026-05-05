@@ -448,32 +448,47 @@ init_db();actualizar_db();generar_deuda_mensual()
 @app.route("/",methods=["GET","POST"])
 def login():
     error=""
+
     if request.method=="POST":
-    user=request.form.get("usuario","").strip()
-    clave=request.form.get("clave","")
+        user=request.form.get("usuario","").strip()
+        clave=request.form.get("clave","")
 
-    ip = request.remote_addr
-    if ip in login_attempts and login_attempts[ip] >= 5:
-        return "Demasiados intentos. Esperá unos minutos."
+        ip = request.remote_addr
+        if ip in login_attempts and login_attempts[ip] >= 5:
+            return "Demasiados intentos. Esperá unos minutos."
 
-    conn=conectar();c=conn.cursor()
-    c.execute("SELECT clave,rol,nombre_display FROM usuarios WHERE usuario=%s",(user,))
-    data=c.fetchone();conn.close()
+        conn=conectar()
+        c=conn.cursor()
+        c.execute("SELECT clave,rol,nombre_display FROM usuarios WHERE usuario=%s",(user,))
+        data=c.fetchone()
+        conn.close()
 
-    if data and check_password_hash(data[0],clave):
-        login_attempts[ip] = 0
-        session.permanent = True
+        if data and check_password_hash(data[0],clave):
+            login_attempts[ip] = 0
+            session.permanent = True
 
-        session["user"]=user
-        session["rol"]=data[1] or "secretaria"
-        session["display"]=data[2] or user
+            session["user"]=user
+            session["rol"]=data[1] or "secretaria"
+            session["display"]=data[2] or user
 
-        return redirect("/panel" if session["rol"]=="admin" else "/clientes")
+            log_security("Login correcto", user)
 
-    else:
-        login_attempts[ip] = login_attempts.get(ip, 0) + 1
-        log_security(f"Login fallido usuario={user}")
+            return redirect("/panel" if session["rol"]=="admin" else "/clientes")
 
+        else:
+            login_attempts[ip] = login_attempts.get(ip, 0) + 1
+            log_security(f"Login fallido usuario={user}")
+            error="Usuario o contraseña incorrectos"
+
+    return f"""
+    <h2>Login</h2>
+    <form method="post">
+        <input name="usuario" placeholder="Usuario"><br>
+        <input name="clave" type="password" placeholder="Contraseña"><br>
+        <button>Ingresar</button>
+        <p style='color:red'>{error}</p>
+    </form>
+    """
 @app.route("/logout")
 def logout():
     registrar_auditoria("LOGOUT","Cierre de sesion");session.clear();return redirect("/")
