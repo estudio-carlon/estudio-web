@@ -124,8 +124,12 @@ def registrar_evento_seguridad(tipo, detalle, ip="", usuario=""):
 
 MEDIOS_PAGO = ["Transferencia -> Natasha Carlon","Transferencia -> Maira Carlon",
                "Efectivo","Cheque","Dolares","Otro"]
-CATEGORIAS_GASTO = ["Sueldo","Luz","Internet","Tarjetas","Gastos de Oficina",
-                    "Articulos de Limpieza","Papeleria","Otros"]
+# Categorías solo para admin (secretarias NO pueden ver ni cargar estas)
+CATEGORIAS_ADMIN = ["Sueldo","Gastos Personales Natasha","Gastos Personales Maira","Tarjetas","Retiro Natasha","Retiro Maira","Otros Admin"]
+# Categorías permitidas para secretarias
+CATEGORIAS_SEC   = ["Luz","Internet","Agua","Gastos de Oficina","Artículos de Limpieza","Papelería","Otros"]
+# Todas las categorías (admin ve todo)
+CATEGORIAS_GASTO = CATEGORIAS_ADMIN + CATEGORIAS_SEC
 VENCIMIENTOS_IMPOSITIVOS = [
     {"id":"ib_cat_a",   "nombre":"Ingresos Brutos - Cat. A", "dia":18,"tipo":"IIBB Sgo.","detalle":"Categoria A - vence el 18 de cada mes"},
     {"id":"ib_cat_b",   "nombre":"Ingresos Brutos - Cat. B", "dia":15,"tipo":"IIBB Sgo.","detalle":"Categoria B - vence el 15 de cada mes"},
@@ -435,6 +439,10 @@ def actualizar_db():
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS observaciones TEXT",
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT FALSE",
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS emitido_por TEXT",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS condicion_fiscal TEXT DEFAULT 'Responsable Inscripto'",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS actividad TEXT",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS envio_wa_facturas BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsable_inscripto BOOLEAN DEFAULT FALSE",
     ]:
         try: c.execute(ddl)
         except: conn.rollback()
@@ -1450,50 +1458,102 @@ def asistente():
 # ══════════════════════════════════════════════════════════════════════════════
 #  CLIENTES
 # ══════════════════════════════════════════════════════════════════════════════
+CONDICIONES_FISCALES = [
+    "Responsable Inscripto","Monotributista","Exento","No Responsable",
+    "Consumidor Final","Sujeto No Categorizado","Proveedor del Exterior"
+]
+
 @app.route("/clientes", methods=["GET","POST"])
 @login_req
 def clientes():
     conn=conectar();c=conn.cursor();flash=""
     if request.method=="POST":
-        nombre=request.form.get("nombre","").strip();cuit=request.form.get("cuit","").strip()
-        tel=request.form.get("telefono","").strip();email=request.form.get("email","").strip()
+        nombre=request.form.get("nombre","").strip()
+        cuit=request.form.get("cuit","").strip()
+        tel=request.form.get("telefono","").strip()
+        email=request.form.get("email","").strip()
         abono=request.form.get("abono",0) or 0
-        # Encriptar datos sensibles
-        c.execute("INSERT INTO clientes(nombre,cuit,telefono,email,abono) VALUES(%s,%s,%s,%s,%s)",
-                  (nombre,enc(cuit),enc(tel),enc(email),abono))
+        condicion=request.form.get("condicion_fiscal","Responsable Inscripto")
+        actividad=request.form.get("actividad","").strip()
+        ri = condicion == "Responsable Inscripto"
+        wa_fact = request.form.get("envio_wa_facturas","0")=="1"
+        c.execute("""INSERT INTO clientes(nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas)
+                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact))
         conn.commit()
         periodo=datetime.now().strftime("%m/%Y")
         c.execute("SELECT id FROM clientes WHERE nombre=%s ORDER BY id DESC LIMIT 1",(nombre,))
         row=c.fetchone()
         if row:
             c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(row[0],periodo,float(abono) if abono else 0))
-            conn.commit();registrar_auditoria("NUEVO CLIENTE",f"CUIT:{cuit} Hon:{fmt(abono)}",row[0],nombre)
-        flash=f'<div class="flash fok">Cliente {nombre} agregado</div>'
-    c.execute("SELECT id,nombre,cuit,telefono,email,abono FROM clientes ORDER BY nombre")
+            conn.commit();registrar_auditoria("NUEVO CLIENTE",f"CUIT:{cuit} Cond:{condicion} Hon:{fmt(abono)}",row[0],nombre)
+        flash=f'<div class="flash fok">✅ Cliente {nombre} agregado</div>'
+
+    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes ORDER BY nombre")
     data_raw=c.fetchall();conn.close();es_admin=session.get("rol")=="admin"
     rows=""
     for d in data_raw:
-        cid,nombre,cuit_enc,tel_enc,email_enc,abono=d
+        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f=d
         cuit_d=dec(cuit_enc);tel_d=dec(tel_enc);email_d=dec(email_enc)
-        btn_del=f'<button onclick="confBorrar({cid},\'{nombre.replace(chr(39),"")}\',event)" class="btn btn-xs btn-r">🗑</button>' if es_admin else ""
-        rows+=f'<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()}"><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td><td class="mu">{tel_d or "---"}</td><td class="mu">{email_d or "---"}</td><td>{fmt(abono or 0)}</td><td style="white-space:nowrap;display:flex;gap:5px;flex-wrap:wrap"><a href="/cuenta/{cid}" class="btn btn-xs btn-p">Cuenta</a><a href="/editar_cliente/{cid}" class="btn btn-xs btn-o">Editar</a>{btn_del}</td></tr>'
-    modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM(\'mb\')">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
+        cuit_limpio=(cuit_d or "").replace("-","").replace(" ","")
+        cond_color={"Responsable Inscripto":"#185FA5","Monotributista":"#1D9E75","Exento":"#7B68EE"}.get(condicion or "","#888")
+        cond_badge=f'<span style="font-size:.65rem;padding:2px 6px;border-radius:8px;background:#f0f4ff;color:{cond_color};font-weight:700">{condicion or "---"}</span>'
+        ri_icon="🟢 " if ri else ""
+        wa_icon='<span title="Recibe WA facturas" style="font-size:.8rem"> 📱</span>' if wa_f else ""
+        btn_arca=f'<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit={cuit_limpio}" target="_blank" class="btn btn-xs btn-arca" title="Constancia ARCA">ARCA</a>' if cuit_limpio else ""
+        btn_iibb=f'<a href="http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit={cuit_limpio}" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px" title="IIBB Rentas SGO">IIBB</a>' if cuit_limpio else ""
+        btn_del=f'<button onclick="confBorrar({cid},{repr(nombre.replace(chr(39),""))},event)" class="btn btn-xs btn-r">🗑</button>' if es_admin else ""
+        rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
+          <td class="nm">{nombre}{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
+          <td class="mu">{cuit_d or "---"}<br>{cond_badge}</td>
+          <td class="mu">{tel_d or "---"}</td>
+          <td class="mu">{email_d or "---"}</td>
+          <td>{fmt(abono or 0)}</td>
+          <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+            <a href="/cuenta/{cid}" class="btn btn-xs btn-p">Cuenta</a>
+            <a href="/editar_cliente/{cid}" class="btn btn-xs btn-o">Editar</a>
+            {btn_arca}{btn_iibb}{btn_del}
+          </div></td>
+        </tr>'''
+
+    btn_wa_masivo='<a href="/wa_facturas_preview" class="btn btn-wa btn-sm">📱 WA Fin de Mes</a>' if es_admin else ""
+    cond_opts="".join(f'<option value="{cf}">{cf}</option>' for cf in CONDICIONES_FISCALES)
+    modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM('mb')">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
+    n_ri=sum(1 for d in data_raw if d[8])
+    n_wa=sum(1 for d in data_raw if d[9])
     body=f"""
-    <h1 class="page-title">Clientes</h1><p class="page-sub">{len(data_raw)} clientes registrados</p>{flash}
+    <h1 class="page-title">Clientes</h1>
+    <p class="page-sub">{len(data_raw)} clientes · {n_ri} Resp. Inscriptos · {n_wa} con WA activo</p>
+    {flash}
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      {btn_wa_masivo}
+      <a href="/exportar/excel/clientes" class="btn btn-g btn-sm">📊 Excel Clientes</a>
+    </div>
     <div class="fcard"><h3>Nuevo Cliente</h3><form method="post">
       <div class="fgrid">
         <div class="fg"><label>Nombre / Razón Social</label><input name="nombre" required placeholder="Garcia Juan"></div>
-        <div class="fg"><label>CUIT</label><input name="cuit" placeholder="20-12345678-9"></div>
-        <div class="fg"><label>Teléfono</label><input name="telefono" placeholder="3846000000"></div>
+        <div class="fg"><label>CUIT</label><input name="cuit" placeholder="20-12345678-9" id="cuit-inp"></div>
+        <div class="fg"><label>Condición Fiscal</label><select name="condicion_fiscal">{cond_opts}</select></div>
+        <div class="fg"><label>Actividad Principal</label><input name="actividad" placeholder="Ej: Comercio minorista ropa"></div>
+        <div class="fg"><label>Teléfono WhatsApp (sin 0 ni 15)</label><input name="telefono" placeholder="3855123456" id="tel-inp"></div>
         <div class="fg"><label>Email</label><input name="email" type="email" placeholder="cliente@email.com"></div>
         <div class="fg"><label>Honorarios $ / mes</label><input name="abono" type="number" placeholder="0"></div>
       </div>
-      <div class="info-box" style="margin-bottom:10px">🔒 CUIT, teléfono y email se guardan encriptados en la base de datos.</div>
-      <button class="btn btn-p">Guardar Cliente</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <input type="checkbox" name="envio_wa_facturas" value="1" id="wa-chk" style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="wa-chk">📱 Enviar recordatorio WhatsApp de facturas de compras a fin de mes</label>
+      </div>
+      <div id="wa-hint" style="display:none" class="info-box" style="margin-bottom:10px">✅ Este cliente recibirá WhatsApp automático a fin de mes.</div>
+      <div class="info-box" style="margin-bottom:12px">🔒 CUIT, teléfono y email se guardan encriptados.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-p">Guardar Cliente</button>
+        <button type="button" class="btn btn-arca btn-sm" onclick="buscarArca()">🔍 Ver constancia ARCA</button>
+        <button type="button" class="btn btn-sm" style="background:#6a1b9a;color:#fff" onclick="buscarIIBB()">🔍 Ver constancia IIBB</button>
+      </div>
     </form></div>
-    <div class="search"><span>🔍</span><input id="bus" placeholder="Buscar por nombre, CUIT o email..." oninput="filt(this.value)"></div>
+    <div class="search"><span>🔍</span><input id="bus" placeholder="Buscar por nombre, CUIT, actividad..." oninput="filt(this.value)"></div>
     <div class="dtable"><table>
-      <thead><tr><th>Nombre</th><th>CUIT</th><th>Teléfono</th><th>Email</th><th>Honorarios</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>CUIT / Cond.</th><th>Teléfono</th><th>Email</th><th>Honorarios</th><th>Acciones</th></tr></thead>
       <tbody id="tb">{rows}</tbody>
     </table></div>{modal}
     <script>
@@ -1501,6 +1561,9 @@ def clientes():
     function confBorrar(id,nm,e){{e.preventDefault();document.getElementById('mb-nm').textContent=nm;document.getElementById('mb-ok').href='/borrar_cliente/'+id;document.getElementById('mb').classList.add('on')}}
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
+    document.getElementById('wa-chk').addEventListener('change',function(){{document.getElementById('wa-hint').style.display=this.checked?'block':'none'}})
+    function buscarArca(){{var c=document.getElementById('cuit-inp').value.replace(/-/g,'').replace(/ /g,'');if(!c){{alert('Ingresá el CUIT');return;}}window.open('https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+c,'_blank')}}
+    function buscarIIBB(){{var c=document.getElementById('cuit-inp').value.replace(/-/g,'').replace(/ /g,'');if(!c){{alert('Ingresá el CUIT');return;}}window.open('http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit='+c,'_blank')}}
     </script>"""
     return page("Clientes",body,"Clientes")
 
@@ -1659,22 +1722,72 @@ def deudas():
 @app.route("/gastos", methods=["GET","POST"])
 @login_req
 def gastos():
+    es_admin = session.get("rol") == "admin"
     conn=conectar();c=conn.cursor();flash=""
+
     if request.method=="POST":
-        fecha=request.form.get("fecha",now_ar());cat=request.form.get("categoria","Otros")
-        desc=request.form.get("descripcion","").strip();monto=float(request.form.get("monto",0) or 0)
-        c.execute("INSERT INTO gastos(fecha,categoria,descripcion,monto,usuario) VALUES(%s,%s,%s,%s,%s)",
-                  (fecha,cat,desc,monto,session.get("display","")))
-        conn.commit();registrar_auditoria("GASTO",f"{cat}: {fmt(monto)} - {desc}")
-        flash=f'<div class="flash fok">Gasto registrado: {fmt(monto)}</div>'
-    c.execute("SELECT id,fecha,categoria,descripcion,monto,usuario FROM gastos ORDER BY id DESC LIMIT 80")
-    data=c.fetchall();conn.close()
+        fecha=request.form.get("fecha",now_ar())
+        cat=request.form.get("categoria","Otros")
+        desc=request.form.get("descripcion","").strip()
+        monto=float(request.form.get("monto",0) or 0)
+        # Validar que secretaria no pueda cargar categorías admin
+        if not es_admin and cat in CATEGORIAS_ADMIN:
+            flash='<div class="flash ferr">No tenés permiso para esa categoría</div>'
+        else:
+            c.execute("INSERT INTO gastos(fecha,categoria,descripcion,monto,usuario) VALUES(%s,%s,%s,%s,%s)",
+                      (fecha,cat,desc,monto,session.get("display","")))
+            conn.commit();registrar_auditoria("GASTO",f"{cat}: {fmt(monto)} - {desc}")
+            flash=f'<div class="flash fok">Gasto registrado: {fmt(monto)}</div>'
+
+    # Secretarias solo ven sus propias categorías permitidas
+    if es_admin:
+        c.execute("SELECT id,fecha,categoria,descripcion,monto,usuario FROM gastos ORDER BY id DESC LIMIT 100")
+    else:
+        placeholders=",".join(["%s"]*len(CATEGORIAS_SEC))
+        c.execute(f"SELECT id,fecha,categoria,descripcion,monto,usuario FROM gastos WHERE categoria IN ({placeholders}) ORDER BY id DESC LIMIT 80",
+                  tuple(CATEGORIAS_SEC))
+
+    data=c.fetchall()
+
+    # Total visible para cada rol
     total=sum(d[4] for d in data)
-    opts="".join(f'<option value="{c}">{c}</option>' for c in CATEGORIAS_GASTO)
-    rows="".join(f'<tr><td class="mu">{d[1]}</td><td><span class="bmedio">{d[2]}</span></td><td>{d[3]}</td><td style="font-weight:600;color:var(--danger)">{fmt(d[4])}</td><td class="mu">{d[5]}</td></tr>' for d in data)
+
+    # Admin ve totales por grupo
+    if es_admin:
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM gastos WHERE categoria=ANY(%s)",([c2 for c2 in CATEGORIAS_ADMIN],))
+        total_admin_cats=c.fetchone()[0]
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM gastos WHERE categoria=ANY(%s)",([c2 for c2 in CATEGORIAS_SEC],))
+        total_sec_cats=c.fetchone()[0]
+        resumen_admin=f'''
+        <div class="stats" style="margin-bottom:16px">
+          <div class="scard r"><div class="slabel">Gastos Estudio</div><div class="sval">{fmt(total_sec_cats)}</div></div>
+          <div class="scard p"><div class="slabel">Gastos Admin/Socias</div><div class="sval">{fmt(total_admin_cats)}</div></div>
+          <div class="scard o"><div class="slabel">Total General</div><div class="sval">{fmt(total)}</div></div>
+        </div>
+        <div class="warn-box" style="margin-bottom:14px">🔒 Las categorías <b>Sueldo, Gastos Personales, Retiros y Tarjetas</b> son solo visibles para Administradores.</div>
+        '''
+    else:
+        resumen_admin=""
+
+    cats_disponibles = CATEGORIAS_GASTO if es_admin else CATEGORIAS_SEC
+    opts="".join(f'<option value="{cat2}">{cat2}</option>' for cat2 in cats_disponibles)
+
+    # Colorear filas según grupo
+    COLORES_CAT={"Sueldo":"#7B68EE","Gastos Personales Natasha":"#C8A96E","Gastos Personales Maira":"#C8A96E",
+                 "Tarjetas":"#E67E22","Retiro Natasha":"#C8A96E","Retiro Maira":"#C8A96E"}
+
+    rows=""
+    for d in data:
+        color=COLORES_CAT.get(d[2],"var(--info)")
+        rows+=f'<tr><td class="mu">{d[1]}</td><td><span class="bmedio" style="background:{"#f5f0ff" if d[2] in CATEGORIAS_ADMIN else "#f0f4ff"};color:{color}">{d[2]}</span></td><td>{d[3]}</td><td style="font-weight:600;color:var(--danger)">{fmt(d[4])}</td><td class="mu">{d[5]}</td></tr>'
+
+    conn.close()
+
+    subtitulo = f"Total visible: {fmt(total)}" if not es_admin else f"Total general: {fmt(total)}"
     body=f"""
-    <h1 class="page-title">Gastos</h1><p class="page-sub">Total registrado: {fmt(total)}</p>{flash}
-    <div class="fcard"><h3>Nuevo Gasto</h3><form method="post">
+    <h1 class="page-title">Gastos</h1><p class="page-sub">{subtitulo}</p>{flash}
+    {resumen_admin}
+    <div class="fcard"><h3>Registrar Gasto</h3><form method="post">
       <div class="fgrid">
         <div class="fg"><label>Fecha</label><input name="fecha" value="{now_ar()}"></div>
         <div class="fg"><label>Categoría</label><select name="categoria">{opts}</select></div>
@@ -1685,7 +1798,7 @@ def gastos():
     </form></div>
     <div class="dtable"><table>
       <thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th>Monto</th><th>Usuario</th></tr></thead>
-      <tbody>{rows or "<tr><td colspan=5 style='color:var(--muted);text-align:center;padding:20px'>Sin gastos</td></tr>"}</tbody>
+      <tbody>{rows or "<tr><td colspan=5 style='color:var(--muted);text-align:center;padding:20px'>Sin gastos registrados</td></tr>"}</tbody>
     </table></div>"""
     return page("Gastos",body,"Gastos")
 
@@ -1829,8 +1942,245 @@ def reportes():
     <div id="t4" class="tabpanel"><div class="dtable"><table><thead><tr><th>Categoría</th><th>Total</th></tr></thead><tbody>{filas_gastos or "<tr><td colspan=2 style='color:var(--muted);text-align:center;padding:20px'>Sin gastos</td></tr>"}</tbody></table></div></div>
     <div id="t5" class="tabpanel"><div class="fcard"><h3>Registro completo</h3>{filas_aud or "<p style='color:var(--muted);font-size:.84rem'>Sin actividad</p>"}</div></div>
     <script>function showTab(id,btn){{document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}}</script>
-    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
+    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>
+    <div class="fcard" style="margin-top:20px">
+      <h3>📥 Exportar Reportes</h3>
+      <p style="color:var(--muted);font-size:.83rem;margin-bottom:14px">Descargá los datos en Excel o PDF para usar en tu computadora o enviar por mail.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a href="/exportar/excel/periodos" class="btn btn-g">📊 Excel - Por Periodo</a>
+        <a href="/exportar/excel/clientes" class="btn btn-g">📊 Excel - Clientes</a>
+        <a href="/exportar/excel/gastos" class="btn btn-g">📊 Excel - Gastos</a>
+        <a href="/exportar/excel/deudores" class="btn btn-g">📊 Excel - Deudores</a>
+        <a href="/exportar/pdf/resumen" class="btn btn-r">📄 PDF - Resumen General</a>
+        <a href="/exportar/pdf/deudores" class="btn btn-r">📄 PDF - Deudores</a>
+      </div>
+    </div>"""
     return page("Reportes",body,"Reportes")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  EXPORTACIONES EXCEL y PDF
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/exportar/excel/<tipo>")
+@admin_req
+def exportar_excel(tipo):
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        return "openpyxl no instalado. Agregá openpyxl al requirements.txt", 500
+
+    conn=conectar();c=conn.cursor()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+
+    # Estilos
+    hdr_font = Font(bold=True, color="FFFFFF", size=11)
+    hdr_fill = PatternFill("solid", fgColor="1A3A2A")
+    sub_fill = PatternFill("solid", fgColor="C8A96E")
+    num_font = Font(size=10)
+    thin = Border(
+        left=Side(style="thin",color="E0D8CC"),
+        right=Side(style="thin",color="E0D8CC"),
+        top=Side(style="thin",color="E0D8CC"),
+        bottom=Side(style="thin",color="E0D8CC")
+    )
+
+    def set_header(ws, row, cols):
+        for ci, col in enumerate(cols, 1):
+            cell = ws.cell(row=row, column=ci, value=col)
+            cell.font = hdr_font
+            cell.fill = hdr_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = thin
+
+    def set_title(ws, title):
+        ws.merge_cells("A1:F1")
+        t = ws["A1"]
+        t.value = title
+        t.font = Font(bold=True, size=14, color="1A3A2A")
+        t.alignment = Alignment(horizontal="center")
+        ws.merge_cells("A2:F2")
+        ws["A2"].value = f"Estudio Contable Carlon  ·  Generado: {now_ar()}"
+        ws["A2"].font = Font(size=9, color="888888")
+        ws["A2"].alignment = Alignment(horizontal="center")
+
+    if tipo == "periodos":
+        ws.title = "Por Periodo"
+        set_title(ws, "Reporte por Período - Estudio Carlon")
+        set_header(ws, 4, ["Periodo","Facturado","Cobrado","Deuda","% Cobrado"])
+        c.execute("SELECT periodo,COALESCE(SUM(debe),0),COALESCE(SUM(haber),0),COALESCE(SUM(debe-haber),0) FROM cuentas GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC")
+        for ri, row in enumerate(c.fetchall(), 5):
+            pct = round(float(row[2])/float(row[1])*100,1) if row[1] else 0
+            ws.cell(ri,1,row[0]);ws.cell(ri,2,round(float(row[1]),2));ws.cell(ri,3,round(float(row[2]),2));ws.cell(ri,4,round(float(row[3] or 0),2));ws.cell(ri,5,f"{pct}%")
+            for ci in range(1,6):
+                ws.cell(ri,ci).border=thin
+                ws.cell(ri,ci).alignment=Alignment(horizontal="right" if ci>1 else "left")
+        col_widths=[12,16,16,16,12]
+        fname = "reporte_periodos.xlsx"
+
+    elif tipo == "clientes":
+        ws.title = "Clientes"
+        set_title(ws, "Reporte por Cliente - Estudio Carlon")
+        set_header(ws, 4, ["Cliente","CUIT","Honorario","Facturado","Cobrado","Saldo"])
+        c.execute("""SELECT cl.nombre,cl.cuit,cl.abono,
+                     COALESCE(SUM(cu.debe),0),COALESCE(SUM(cu.haber),0),COALESCE(SUM(cu.debe-cu.haber),0)
+                     FROM clientes cl LEFT JOIN cuentas cu ON cl.id=cu.cliente_id
+                     GROUP BY cl.nombre,cl.cuit,cl.abono ORDER BY cl.nombre""")
+        for ri, row in enumerate(c.fetchall(), 5):
+            cuit_d = dec(row[1]) if row[1] else ""
+            ws.cell(ri,1,row[0]);ws.cell(ri,2,cuit_d);ws.cell(ri,3,round(float(row[2] or 0),2))
+            ws.cell(ri,4,round(float(row[3]),2));ws.cell(ri,5,round(float(row[4]),2));ws.cell(ri,6,round(float(row[5] or 0),2))
+            for ci2 in range(1,7):
+                ws.cell(ri,ci2).border=thin
+                ws.cell(ri,ci2).alignment=Alignment(horizontal="right" if ci2>2 else "left")
+                if ci2==6 and float(row[5] or 0)>0:
+                    ws.cell(ri,ci2).font=Font(color="C0392B",bold=True)
+        col_widths=[30,16,14,14,14,14]
+        fname = "reporte_clientes.xlsx"
+
+    elif tipo == "gastos":
+        ws.title = "Gastos"
+        set_title(ws, "Reporte de Gastos - Estudio Carlon")
+        set_header(ws, 4, ["Fecha","Categoría","Descripción","Monto","Usuario"])
+        c.execute("SELECT fecha,categoria,descripcion,monto,usuario FROM gastos ORDER BY id DESC")
+        for ri, row in enumerate(c.fetchall(), 5):
+            ws.cell(ri,1,row[0]);ws.cell(ri,2,row[1]);ws.cell(ri,3,row[2])
+            ws.cell(ri,4,round(float(row[3]),2));ws.cell(ri,5,row[4])
+            for ci2 in range(1,6):
+                ws.cell(ri,ci2).border=thin
+        # Totales por categoría en hoja 2
+        ws2 = wb.create_sheet("Por Categoría")
+        set_header(ws2, 1, ["Categoría","Total","% del Total"])
+        c.execute("SELECT categoria,SUM(monto) FROM gastos GROUP BY categoria ORDER BY SUM(monto) DESC")
+        gastos_cat=c.fetchall();total_g=sum(float(r[1]) for r in gastos_cat) or 1
+        for ri, row in enumerate(gastos_cat, 2):
+            ws2.cell(ri,1,row[0]);ws2.cell(ri,2,round(float(row[1]),2));ws2.cell(ri,3,f"{round(float(row[1])/total_g*100,1)}%")
+        col_widths=[14,30,30,14,16]
+        fname = "reporte_gastos.xlsx"
+
+    elif tipo == "deudores":
+        ws.title = "Deudores"
+        set_title(ws, "Deudores Pendientes - Estudio Carlon")
+        set_header(ws, 4, ["Cliente","Teléfono","Email","Deuda Total"])
+        c.execute("""SELECT cl.nombre,cl.telefono,cl.email,SUM(cu.debe-cu.haber) d
+                     FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id
+                     GROUP BY cl.nombre,cl.telefono,cl.email HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC""")
+        for ri, row in enumerate(c.fetchall(), 5):
+            tel_d=dec(row[1]) if row[1] else "";email_d=dec(row[2]) if row[2] else ""
+            ws.cell(ri,1,row[0]);ws.cell(ri,2,tel_d);ws.cell(ri,3,email_d);ws.cell(ri,4,round(float(row[3]),2))
+            for ci2 in range(1,5): ws.cell(ri,ci2).border=thin
+            ws.cell(ri,4).font=Font(color="C0392B",bold=True)
+        col_widths=[30,16,28,14]
+        fname = "deudores.xlsx"
+    else:
+        conn.close();return "Tipo no válido",404
+
+    # Auto-width columns
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    conn.close()
+    buf = BytesIO()
+    wb.save(buf);buf.seek(0)
+    return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name=fname)
+
+
+@app.route("/exportar/pdf/<tipo>")
+@admin_req
+def exportar_pdf_reporte(tipo):
+    conn=conectar();c=conn.cursor()
+    buf=BytesIO();cv=canvas.Canvas(buf,pagesize=A4);w,h=A4
+
+    def header_pdf(titulo, subtitulo=""):
+        cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(0,h-80,w,80,fill=1,stroke=0)
+        cv.setFillColorRGB(0.78,0.66,0.43);cv.setFont("Helvetica-Bold",16)
+        cv.drawString(36,h-38,titulo)
+        cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica",9)
+        cv.drawString(36,h-56,"Estudio Contable Carlon  ·  Quimilí, Santiago del Estero")
+        cv.setFont("Helvetica",8);cv.drawRightString(w-36,h-38,f"Generado: {now_ar()}")
+        if subtitulo:
+            cv.setFont("Helvetica-Oblique",8);cv.drawRightString(w-36,h-54,subtitulo)
+
+    def table_header(y, cols, widths, startx=36):
+        cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(startx,y-14,sum(widths),16,fill=1,stroke=0)
+        cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica-Bold",8)
+        x=startx
+        for col,ww in zip(cols,widths):
+            cv.drawString(x+4,y-10,str(col)[:20]);x+=ww
+        return y-16
+
+    def draw_row(y, vals, widths, startx=36, alt=False):
+        if alt: cv.setFillColorRGB(0.97,0.96,0.93);cv.rect(startx,y-13,sum(widths),14,fill=1,stroke=0)
+        cv.setFillColorRGB(0.15,0.15,0.15);cv.setFont("Helvetica",8.5)
+        x=startx
+        for val,ww in zip(vals,widths):
+            cv.drawString(x+4,y-10,str(val)[:28]);x+=ww
+        cv.setStrokeColorRGB(0.87,0.87,0.87);cv.line(startx,y-13,startx+sum(widths),y-13)
+        return y-14
+
+    if tipo == "resumen":
+        header_pdf("Resumen General Financiero", "Todos los periodos")
+        y = h-110
+
+        # Totales generales
+        c.execute("SELECT COALESCE(SUM(debe),0),COALESCE(SUM(haber),0) FROM cuentas");td,th2=c.fetchone()
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM gastos");tg=c.fetchone()[0]
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Natasha%'");nat=c.fetchone()[0]
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Maira%'");mai=c.fetchone()[0]
+
+        cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,y-70,w-72,62,6,fill=1,stroke=0)
+        cv.setFont("Helvetica-Bold",10);cv.setFillColorRGB(0.10,0.23,0.16)
+        cv.drawString(50,y-18,"RESUMEN FINANCIERO GENERAL")
+        cv.setFont("Helvetica",9);cv.setFillColorRGB(0.2,0.2,0.2)
+        col_w=(w-90)/3
+        datos_res=[("Total Facturado",fmt(td)),("Total Cobrado",fmt(th2)),("Deuda Pendiente",fmt(td-th2)),
+                   ("Total Gastos",fmt(tg)),("Natasha Cobró",fmt(nat)),("Maira Cobró",fmt(mai))]
+        for i,(lb,val) in enumerate(datos_res):
+            cx=50+(i%3)*col_w;cy=y-38-(i//3)*18
+            cv.setFont("Helvetica",8);cv.setFillColorRGB(0.5,0.5,0.5);cv.drawString(cx,cy,lb)
+            cv.setFont("Helvetica-Bold",9);cv.setFillColorRGB(0.10,0.23,0.16);cv.drawString(cx,cy-12,val)
+        y -= 88
+
+        # Tabla por período
+        cv.setFont("Helvetica-Bold",10);cv.setFillColorRGB(0.10,0.23,0.16);cv.drawString(36,y,"Por Período")
+        y -= 8
+        cols=["Periodo","Facturado","Cobrado","Deuda"];widths=[80,130,130,130]
+        y = table_header(y, cols, widths)
+        c.execute("SELECT periodo,COALESCE(SUM(debe),0),COALESCE(SUM(haber),0),COALESCE(SUM(debe-haber),0) FROM cuentas GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC LIMIT 18")
+        for i,row in enumerate(c.fetchall()):
+            if y < 60: cv.showPage();header_pdf("Resumen (cont.)");y=h-110
+            vals=[row[0],fmt(row[1]),fmt(row[2]),fmt(row[3] or 0)]
+            y=draw_row(y,vals,widths,alt=i%2==0)
+
+    elif tipo == "deudores":
+        header_pdf("Listado de Deudores", f"Fecha: {now_ar()}")
+        y = h-110
+        cv.setFont("Helvetica-Bold",10);cv.setFillColorRGB(0.10,0.23,0.16);cv.drawString(36,y,"Clientes con Saldo Pendiente")
+        y -= 8
+        cols=["Cliente","Teléfono","Deuda Total"];widths=[200,120,150]
+        y = table_header(y, cols, widths)
+        c.execute("""SELECT cl.nombre,cl.telefono,SUM(cu.debe-cu.haber) d
+                     FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id
+                     GROUP BY cl.nombre,cl.telefono HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC""")
+        total_d=0
+        for i,row in enumerate(c.fetchall()):
+            if y < 60: cv.showPage();header_pdf("Deudores (cont.)");y=h-110
+            tel_d=dec(row[1]) if row[1] else "---"
+            total_d+=float(row[2])
+            y=draw_row(y,[row[0],tel_d,fmt(row[2])],widths,alt=i%2==0)
+        y-=10
+        cv.setFont("Helvetica-Bold",10);cv.setFillColorRGB(0.10,0.23,0.16)
+        cv.drawString(36,y,f"Total deuda: {fmt(total_d)}")
+    else:
+        conn.close();return "Tipo no válido",404
+
+    conn.close()
+    cv.save();buf.seek(0)
+    fname = f"reporte_{tipo}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    return send_file(buf,mimetype="application/pdf",as_attachment=True,download_name=fname)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  USUARIOS (redirige a configuracion)
