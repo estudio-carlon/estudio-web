@@ -1500,7 +1500,8 @@ def clientes():
         cond_badge=f'<span style="font-size:.65rem;padding:2px 6px;border-radius:8px;background:#f0f4ff;color:{cond_color};font-weight:700">{condicion or "---"}</span>'
         ri_icon="🟢 " if ri else ""
         wa_icon='<span title="Recibe WA facturas" style="font-size:.8rem"> 📱</span>' if wa_f else ""
-        btn_arca=f'<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit={cuit_limpio}" target="_blank" class="btn btn-xs btn-arca" title="Constancia ARCA">ARCA</a>' if cuit_limpio else ""
+        btn_arca=('<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar ARCA">ARCA</a>'
+                 +('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 7px;font-size:.68rem;border-radius:6px">Const.</a>' if cuit_limpio else ""))
         btn_iibb=f'<a href="http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit={cuit_limpio}" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px" title="IIBB Rentas SGO">IIBB</a>' if cuit_limpio else ""
         btn_del=f'<button onclick="confBorrar({cid},{repr(nombre.replace(chr(39),""))},event)" class="btn btn-xs btn-r">🗑</button>' if es_admin else ""
         rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
@@ -1821,10 +1822,8 @@ def cuenta(id):
         else:
             bp='<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
         # boton arca
-        if cuit_limpio:
-            ba='<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
-        else:
-            ba=""
+        ba='<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar a ARCA">ARCA</a>'
+        bc=('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px" title="Ver constancia">Const.</a>' if cuit_limpio else "")
         # boton whatsapp
         if telefono and saldo>0.5:
             bw='<button onclick="abrirWA(\"'+d[0]+'\",'+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
@@ -1837,7 +1836,7 @@ def cuenta(id):
                +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
                +'<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
                +'<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
-               +bp+ba+bw+'</div></div>')
+               +bp+ba+bc+bw+'</div></div>')
     hist_rows=""
     for h in historial:
         fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
