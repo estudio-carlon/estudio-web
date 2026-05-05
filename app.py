@@ -53,9 +53,21 @@ def error_500(e):
     return "Error interno del sistema", 500
 
 # Logger básico de seguridad
-def log_security(msg):
-    print(f"[SECURITY] {msg} | IP: {request.remote_addr}")
+def log_security(msg, user=None):
+    ip = request.remote_addr
+    print(f"[SECURITY] {msg} | IP: {ip}")
 
+    try:
+        conn = conectar()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO seguridad_eventos(usuario, ip, evento) VALUES(%s,%s,%s)",
+            (user, ip, msg)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("Error seguridad:", e)
 DB_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
