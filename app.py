@@ -1609,8 +1609,13 @@ style.textContent = '@keyframes aib{0%,80%,100%{opacity:.2}40%{opacity:1}}';
 document.head.appendChild(style);
 </script>
 """
-    return f'<nav><span class="brand">✦ Estudio Carlon</span><div class="nav-links">{items}</div><div class="user-pill">👤 {disp} {badge}</div></nav>{asistente_widget}
-
+    return f"""<nav>
+    <span class="brand">&#x2726; Estudio Carlon</span>
+    <div class="nav-links">{items}</div>
+    <div class="user-pill">&#x1F464; {disp} {badge}</div>
+    </nav>
+    {ASISTENTE_JS}
+    """
 
 @app.route("/agenda", methods=["GET"])
 @login_req
