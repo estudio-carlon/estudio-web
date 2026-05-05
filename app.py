@@ -323,7 +323,7 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/usuarios","Usuarios"),("/seguridad","🔒 Seguridad"),("/configuracion","⚙️ Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/seguridad","🔒 Seguridad"),("/configuracion","⚙️ Config")]
     links_sec=[("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda")]
     links=links_admin if rol=="admin" else links_sec
     items="".join(f'<a href="{h}" class="{"act" if active==l else ""}">{l}</a>' for h,l in links)
@@ -411,7 +411,10 @@ def init_db():
                       ("natasha", generate_password_hash("carlon2026"), "admin", "Natasha Carlon"))
         else:
             # Hay usuarios pero ninguno es admin: promover el primero
-            c.execute("UPDATE usuarios SET rol='admin' WHERE id=(SELECT id FROM usuarios ORDER BY id LIMIT 1)")
+            c.execute("UPDATE usuarios SET rol='admin', activo=TRUE WHERE id=(SELECT id FROM usuarios ORDER BY id LIMIT 1)")
+            # Asegurarse que todos tengan activo definido
+            c.execute("UPDATE usuarios SET activo=TRUE WHERE activo IS NULL")
+            c.execute("UPDATE usuarios SET totp_habilitado=FALSE WHERE totp_habilitado IS NULL")
     conn.commit();conn.close()
 
 def actualizar_db():
@@ -424,6 +427,10 @@ def actualizar_db():
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_secret TEXT",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_habilitado BOOLEAN DEFAULT FALSE",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE",
+        "UPDATE usuarios SET activo=TRUE WHERE activo IS NULL",
+        "UPDATE usuarios SET totp_habilitado=FALSE WHERE totp_habilitado IS NULL",
+        "ALTER TABLE usuarios ALTER COLUMN activo SET DEFAULT TRUE",
+        "ALTER TABLE usuarios ALTER COLUMN totp_habilitado SET DEFAULT FALSE",
         "ALTER TABLE auditoria ADD COLUMN IF NOT EXISTS cliente_nombre TEXT",
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS observaciones TEXT",
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT FALSE",
@@ -1018,7 +1025,7 @@ def configuracion():
                 if c.fetchone():
                     flash='<div class="flash ferr">Ese usuario ya existe</div>'
                 else:
-                    c.execute("INSERT INTO usuarios(usuario,clave,rol,nombre_display) VALUES(%s,%s,%s,%s)",
+                    c.execute("INSERT INTO usuarios(usuario,clave,rol,nombre_display,activo,totp_habilitado) VALUES(%s,%s,%s,%s,TRUE,FALSE)",
                               (usuario,generate_password_hash(clave),rol,display))
                     conn.commit()
                     registrar_auditoria("NUEVO USUARIO",f"@{usuario} Rol:{rol}")
@@ -1135,8 +1142,8 @@ def configuracion():
     for u in lista:
         uid,uname,urol,udisp,totp_on,activo = u
         badge = '<span class="badge badm">Admin</span>' if urol=="admin" else '<span class="badge bsec">Secretaria</span>'
-        activo_badge = '<span class="sec-badge ok">Activo</span>' if activo else '<span class="sec-badge danger">Inactivo</span>'
-        totp_badge = '<span class="sec-badge ok">2FA ✓</span>' if totp_on else '<span class="sec-badge warn">2FA off</span>'
+        activo_badge = '<span class="sec-badge ok">Activo</span>' if activo is not False else '<span class="sec-badge danger">Inactivo</span>'
+        totp_badge = '<span class="sec-badge ok">2FA ✓</span>' if totp_on is True else '<span class="sec-badge warn">2FA off</span>'
         es_yo = uname == session.get("user")
 
         btn_del = '<span style="font-size:.73rem;color:var(--muted)">sos vos</span>' if es_yo else \
@@ -1144,7 +1151,8 @@ def configuracion():
 
         btn_2fa = f'<form method="post" style="display:inline"><input type=hidden name=accion value={"desactivar_2fa" if totp_on else "activar_2fa"}><input type=hidden name=uid value={uid}><button class="btn btn-xs {"btn-o" if totp_on else "btn-b"}">{"Desact. 2FA" if totp_on else "Activar 2FA"}</button></form>'
 
-        btn_act = f'<form method="post" style="display:inline"><input type=hidden name=accion value=activar_desactivar_usuario><input type=hidden name=uid value={uid}><input type=hidden name=activo_val value={"0" if activo else "1"}><button class="btn btn-xs {"btn-o" if activo else "btn-g"}">{"Deshabilitar" if activo else "Habilitar"}</button></form>' if not es_yo else ""
+        _activo_real = activo is not False
+        btn_act = f'<form method="post" style="display:inline"><input type=hidden name=accion value=activar_desactivar_usuario><input type=hidden name=uid value={uid}><input type=hidden name=activo_val value={"0" if _activo_real else "1"}><button class="btn btn-xs {"btn-o" if _activo_real else "btn-g"}">{"Deshabilitar" if _activo_real else "Habilitar"}</button></form>' if not es_yo else ""
 
         cards += f'''<div class="ucard {"adm" if urol=="admin" else ""}">
           <div>
