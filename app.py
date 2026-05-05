@@ -689,16 +689,16 @@ def panel():
     gcat_data   = [float(r[1]) for r in gastos_cat]
 
     # ── Gráfico 5: Rendimiento acumulado ──
-cum_ing, cum_gas = [], []
-si, sg = 0.0, 0.0
+    cum_ing, cum_gas = [], []
+    si, sg = 0.0, 0.0
 
-for i in range(len(ingresos_m)):
-    si += ingresos_m[i]
-    sg += gastos_m[i]
-    cum_ing.append(round(si))
-    cum_gas.append(round(sg))# ── Gráfico 5: Rendimiento acumulado ──
-    
-      # ── Top deudores ──
+    for i in range(len(ingresos_m)):
+        si += ingresos_m[i]
+        sg += gastos_m[i]
+        cum_ing.append(round(si))
+        cum_gas.append(round(sg))
+
+    # ── Top deudores ── 
     c.execute("""SELECT cl.nombre, SUM(cu.debe-cu.haber) d FROM cuentas cu
                  JOIN clientes cl ON cl.id=cu.cliente_id
                  GROUP BY cl.nombre HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC LIMIT 6""")
