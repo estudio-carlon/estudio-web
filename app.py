@@ -1098,6 +1098,23 @@ def configuracion():
             conn.commit()
             flash='<div class="flash fok">✅ Configuración de seguridad guardada</div>'
 
+        elif accion == "editar_usuario":
+            uid = request.form.get("uid")
+            nuevo_display = request.form.get("nuevo_display","").strip()
+            nuevo_rol = request.form.get("nuevo_rol","secretaria")
+            if uid:
+                # No permitir quitarse rol admin a uno mismo si es el único admin
+                c.execute("SELECT usuario FROM usuarios WHERE id=%s",(uid,))
+                row_u = c.fetchone()
+                if row_u and row_u[0] == session.get("user") and nuevo_rol != "admin":
+                    flash='<div class="flash ferr">No podés quitarte el rol admin a vos mismo</div>'
+                else:
+                    c.execute("UPDATE usuarios SET nombre_display=%s, rol=%s WHERE id=%s",
+                              (nuevo_display, nuevo_rol, uid))
+                    conn.commit()
+                    registrar_auditoria("EDICION_USUARIO",f"Editado uid:{uid} display:{nuevo_display} rol:{nuevo_rol}")
+                    flash='<div class="flash fok">✅ Usuario actualizado correctamente</div>'
+
         elif accion == "activar_desactivar_usuario":
             uid = request.form.get("uid")
             activo_val = request.form.get("activo_val","1")
@@ -1137,6 +1154,7 @@ def configuracion():
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <button onclick="abrirClave({uid},'{uname}')" class="btn btn-xs btn-o">🔑 Clave</button>
+            <button onclick="abrirEditar({uid},'{udisp or uname}','{urol}')" class="btn btn-xs btn-b">✏️ Editar</button>
             {btn_2fa}{btn_act}{btn_del}
           </div>
         </div>'''
@@ -1254,22 +1272,92 @@ def configuracion():
       </div>
     </div>
 
+    <!-- Modal cambiar contraseña -->
     <div class="mo" id="mc"><div class="modal">
-      <h3>🔑 Cambiar Contraseña</h3><p class="msub" id="mc-sub"></p>
+      <h3>🔑 Cambiar Contraseña</h3>
+      <p class="msub" id="mc-sub"></p>
       <form method="post">
         <input type="hidden" name="accion" value="cambiar_clave">
         <input type="hidden" name="uid" id="mc-uid">
-        <div class="fg" style="margin-bottom:12px"><label>Nueva contraseña</label><input name="nueva_clave" type="password" placeholder="Mínimo 6 caracteres" required></div>
-        <div class="fg" style="margin-bottom:14px"><label>Confirmar contraseña</label><input name="confirmar_clave" type="password" placeholder="Repetir contraseña" required></div>
-        <div class="mact"><button type="button" class="btn btn-o" onclick="closeM('mc')">Cancelar</button><button type="submit" class="btn btn-p">Guardar</button></div>
+        <div class="fg" style="margin-bottom:12px">
+          <label>Nueva contraseña</label>
+          <input name="nueva_clave" id="mc-clave1" type="password" placeholder="Mínimo 6 caracteres" required>
+        </div>
+        <div class="fg" style="margin-bottom:14px">
+          <label>Confirmar contraseña</label>
+          <input name="confirmar_clave" id="mc-clave2" type="password" placeholder="Repetir contraseña" required>
+        </div>
+        <div id="mc-match" style="font-size:.78rem;margin-bottom:8px"></div>
+        <div class="mact">
+          <button type="button" class="btn btn-o" onclick="closeM('mc')">Cancelar</button>
+          <button type="submit" class="btn btn-p" id="mc-submit">Guardar</button>
+        </div>
+      </form>
+    </div></div>
+
+    <!-- Modal editar usuario -->
+    <div class="mo" id="me"><div class="modal">
+      <h3>✏️ Editar Usuario</h3>
+      <p class="msub" id="me-sub"></p>
+      <form method="post">
+        <input type="hidden" name="accion" value="editar_usuario">
+        <input type="hidden" name="uid" id="me-uid">
+        <div class="fg" style="margin-bottom:12px">
+          <label>Nombre completo</label>
+          <input name="nuevo_display" id="me-display" placeholder="María González">
+        </div>
+        <div class="fg" style="margin-bottom:14px">
+          <label>Rol</label>
+          <select name="nuevo_rol" id="me-rol">
+            <option value="secretaria">Secretaria</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+        <div class="mact">
+          <button type="button" class="btn btn-o" onclick="closeM('me')">Cancelar</button>
+          <button type="submit" class="btn btn-p">Guardar cambios</button>
+        </div>
       </form>
     </div></div>
 
     <script>
-    function showTab(id,btn){{document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}}
-    function abrirClave(id,u){{document.getElementById('mc-sub').textContent='@'+u;document.getElementById('mc-uid').value=id;document.getElementById('mc').classList.add('on')}}
+    function showTab(id,btn){{
+      document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));
+      document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+      document.getElementById(id).classList.add('on');
+      btn.classList.add('on');
+    }}
+    function abrirClave(id,u){{
+      document.getElementById('mc-sub').textContent='Cambiar clave de @'+u;
+      document.getElementById('mc-uid').value=id;
+      document.getElementById('mc-clave1').value='';
+      document.getElementById('mc-clave2').value='';
+      document.getElementById('mc-match').textContent='';
+      document.getElementById('mc').classList.add('on');
+      setTimeout(()=>document.getElementById('mc-clave1').focus(),100);
+    }}
+    function abrirEditar(id,nombre,rol){{
+      document.getElementById('me-sub').textContent='@'+nombre;
+      document.getElementById('me-uid').value=id;
+      document.getElementById('me-display').value=nombre;
+      document.getElementById('me-rol').value=rol;
+      document.getElementById('me').classList.add('on');
+      setTimeout(()=>document.getElementById('me-display').focus(),100);
+    }}
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
+    // Validar que las claves coincidan en tiempo real
+    function chkMatch(){{
+      var c1=document.getElementById('mc-clave1').value;
+      var c2=document.getElementById('mc-clave2').value;
+      var el=document.getElementById('mc-match');
+      var btn=document.getElementById('mc-submit');
+      if(!c2){{el.textContent='';btn.disabled=false;return;}}
+      if(c1===c2){{el.style.color='var(--success)';el.textContent='✓ Las contraseñas coinciden';btn.disabled=false;}}
+      else{{el.style.color='var(--danger)';el.textContent='✗ No coinciden';btn.disabled=true;}}
+    }}
+    document.getElementById('mc-clave1').addEventListener('input',chkMatch);
+    document.getElementById('mc-clave2').addEventListener('input',chkMatch);
     </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
     return page("Configuración", body, "⚙️ Config")
