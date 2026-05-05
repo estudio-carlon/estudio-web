@@ -400,6 +400,18 @@ def init_db():
     ]
     for k,v in defaults:
         c.execute("INSERT INTO config_seguridad(clave,valor) VALUES(%s,%s) ON CONFLICT(clave) DO NOTHING",(k,v))
+    # Crear admin por defecto si no hay ningún usuario admin
+    c.execute("SELECT COUNT(*) FROM usuarios WHERE rol='admin'")
+    if c.fetchone()[0] == 0:
+        c.execute("SELECT COUNT(*) FROM usuarios")
+        total = c.fetchone()[0]
+        if total == 0:
+            # Base limpia: crear admin natasha
+            c.execute("INSERT INTO usuarios(usuario,clave,rol,nombre_display,activo) VALUES(%s,%s,%s,%s,TRUE)",
+                      ("natasha", generate_password_hash("carlon2026"), "admin", "Natasha Carlon"))
+        else:
+            # Hay usuarios pero ninguno es admin: promover el primero
+            c.execute("UPDATE usuarios SET rol='admin' WHERE id=(SELECT id FROM usuarios ORDER BY id LIMIT 1)")
     conn.commit();conn.close()
 
 def actualizar_db():
@@ -451,6 +463,90 @@ def svg_barras(datos,color="#C8A96E"):
     return f'<svg viewBox="0 0 {W} {H}" class="chart-svg">{bars}{labels}{vals}</svg>'
 
 init_db();actualizar_db();generar_deuda_mensual()
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SETUP INICIAL — crear admin si no existe
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/setup", methods=["GET","POST"])
+def setup():
+    # Solo funciona si no hay ningún admin en la base
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT COUNT(*) FROM usuarios WHERE rol='admin'")
+    hay_admin = c.fetchone()[0] > 0
+
+    msg = ""
+    if hay_admin:
+        conn.close()
+        # Hay admin: solo mostrar quiénes son (sin exponer clave)
+        conn2=conectar();c2=conn2.cursor()
+        c2.execute("SELECT usuario,nombre_display FROM usuarios WHERE rol='admin'")
+        admins = c2.fetchall();conn2.close()
+        lista = "".join(f"<li><b>{a[1] or a[0]}</b> → usuario: <code>{a[0]}</code></li>" for a in admins)
+        return f'''<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setup</title><style>{CSS}</style></head><body>
+<div class="lwrap"><div class="lcard" style="max-width:420px;width:94%">
+<p class="ltitle">✅ Sistema configurado</p>
+<p class="lsub">Ya existe un administrador</p>
+<div class="info-box" style="text-align:left"><ul style="padding-left:16px">{lista}</ul></div>
+<a href="/" class="btn btn-p" style="width:100%;justify-content:center;margin-top:14px">Ir al Login</a>
+</div></div></body></html>'''
+
+    if request.method=="POST":
+        usuario = request.form.get("usuario","").strip()
+        clave   = request.form.get("clave","").strip()
+        nombre  = request.form.get("nombre","").strip() or usuario
+        clave2  = request.form.get("clave2","").strip()
+        if not usuario or not clave:
+            msg = "Completá todos los campos"
+        elif clave != clave2:
+            msg = "Las contraseñas no coinciden"
+        elif len(clave) < 6:
+            msg = "Mínimo 6 caracteres"
+        else:
+            # Ver si el usuario ya existe → actualizarlo a admin
+            c.execute("SELECT id FROM usuarios WHERE usuario=%s",(usuario,))
+            row = c.fetchone()
+            if row:
+                c.execute("UPDATE usuarios SET clave=%s,rol='admin',nombre_display=%s,activo=TRUE WHERE id=%s",
+                          (generate_password_hash(clave), nombre, row[0]))
+            else:
+                c.execute("INSERT INTO usuarios(usuario,clave,rol,nombre_display,activo) VALUES(%s,%s,'admin',%s,TRUE)",
+                          (usuario, generate_password_hash(clave), nombre))
+            conn.commit();conn.close()
+            return f'''<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Listo</title><style>{CSS}</style></head><body>
+<div class="lwrap"><div class="lcard">
+<p class="ltitle">✅ Admin creado</p>
+<p class="lsub">Ya podés ingresar con <b>{usuario}</b></p>
+<a href="/" class="btn btn-p" style="width:100%;justify-content:center;margin-top:14px">Ir al Login</a>
+</div></div></body></html>'''
+
+    conn.close()
+    err = f'<div class="flash ferr">{msg}</div>' if msg else ""
+    return f'''<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setup Inicial</title><style>{CSS}</style></head><body>
+<div class="lwrap"><div class="lcard" style="max-width:420px;width:94%">
+<p class="ltitle">🔧 Setup Inicial</p>
+<p class="lsub">Creá el usuario administrador del sistema</p>
+{err}
+<form method="post">
+  <div class="fg" style="margin-bottom:12px"><label>Nombre completo</label>
+    <input name="nombre" placeholder="Natasha Carlon"></div>
+  <div class="fg" style="margin-bottom:12px"><label>Usuario (para login)</label>
+    <input name="usuario" placeholder="natasha" required></div>
+  <div class="fg" style="margin-bottom:12px"><label>Contraseña</label>
+    <input name="clave" type="password" placeholder="Mínimo 6 caracteres" required></div>
+  <div class="fg" style="margin-bottom:18px"><label>Confirmar contraseña</label>
+    <input name="clave2" type="password" placeholder="Repetir contraseña" required></div>
+  <button class="btn btn-p" style="width:100%;justify-content:center">Crear Administrador</button>
+</form>
+<div style="margin-top:12px;text-align:center">
+  <a href="/" style="color:var(--muted);font-size:.8rem">← Volver al login</a>
+</div>
+</div></div></body></html>'''
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  LOGIN con protección
