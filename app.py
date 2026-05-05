@@ -449,31 +449,30 @@ init_db();actualizar_db();generar_deuda_mensual()
 def login():
     error=""
     if request.method=="POST":
-        user=request.form.get("usuario","").strip();clave=request.form.get("clave","")
-        conn=conectar();c=conn.cursor()
-        ip = request.remote_addr
+    user=request.form.get("usuario","").strip()
+    clave=request.form.get("clave","")
 
-if ip in login_attempts and login_attempts[ip] >= 5:
-    return "Demasiados intentos. Esperá unos minutos."
-        c.execute("SELECT clave,rol,nombre_display FROM usuarios WHERE usuario=%s",(user,))
-        data=c.fetchone();conn.close()
-        if data and check_password_hash(data[0],clave):
-    login_attempts[ip] = 0
-    session.permanent = True
+    ip = request.remote_addr
+    if ip in login_attempts and login_attempts[ip] >= 5:
+        return "Demasiados intentos. Esperá unos minutos."
 
-    session["user"]=user
-    session["rol"]=data[1] or "secretaria"
-    session["display"]=data[2] or user
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT clave,rol,nombre_display FROM usuarios WHERE usuario=%s",(user,))
+    data=c.fetchone();conn.close()
 
-    registrar_auditoria("LOGIN","Inicio de sesion")
+    if data and check_password_hash(data[0],clave):
+        login_attempts[ip] = 0
+        session.permanent = True
 
-    return redirect("/panel" if session["rol"]=="admin" else "/clientes")
+        session["user"]=user
+        session["rol"]=data[1] or "secretaria"
+        session["display"]=data[2] or user
 
-else:
-    login_attempts[ip] = login_attempts.get(ip, 0) + 1
-    log_security(f"Login fallido usuario={user}")
+        return redirect("/panel" if session["rol"]=="admin" else "/clientes")
 
-    error="Usuario o contraseña incorrectos"
+    else:
+        login_attempts[ip] = login_attempts.get(ip, 0) + 1
+        log_security(f"Login fallido usuario={user}")
 
 @app.route("/logout")
 def logout():
