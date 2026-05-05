@@ -1979,24 +1979,44 @@ def gastos():
     return page("Gastos",body,"Gastos")
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CAJA
-# ══════════════════════════════════════════════════════════════════════════════
-MEDIOS_FISICOS = ["Efectivo","Cheque","Dólares"]
+MEDIOS_CAJA = [
+    ("Efectivo",        "efectivo", "#27AE60"),
+    ("Cheque",          "cheque",   "#2475B0"),
+    ("Dolares",         "dolares",  "#E67E22"),
+    ("Transf. Natasha", "nat",      "#1A3A2A"),
+    ("Transf. Maira",   "mai",      "#7B68EE"),
+    ("Otro",            "otro",     "#888"),
+]
 
 def _totales_caja(fecha_hoy, usuario):
     conn=conectar();c=conn.cursor()
     c.execute("SELECT medio,SUM(monto) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s GROUP BY medio",
-              (f"%{fecha_hoy}%",usuario))
-    filas=c.fetchall();conn.close()
-    totales={"Efectivo":0,"Cheque":0,"Dólares":0,"Transferencia → Natasha Carlon":0,"Transferencia → Maira Carlon":0,"Otro":0}
+              (f"%{fecha_hoy}%", usuario))
+    filas=c.fetchall(); conn.close()
+    tot = {k[0]:0.0 for k in MEDIOS_CAJA}
     for medio,monto in filas:
-        for k in totales:
-            if k.lower() in (medio or "").lower():
-                totales[k]+=monto or 0;break
-        else: totales["Otro"]+=monto or 0
-    totales["total_fisico"]=totales["Efectivo"]+totales["Cheque"]+totales["Dólares"]
-    totales["total_general"]=sum(v for k,v in totales.items() if k not in ("total_fisico","total_general"))
-    return totales
+        m=(medio or "").lower()
+        if "efectivo" in m:                              tot["Efectivo"]        += monto or 0
+        elif "cheque" in m:                              tot["Cheque"]          += monto or 0
+        elif "dolar" in m or "lar" in m or "u$s" in m:  tot["Dolares"]         += monto or 0
+        elif "natasha" in m or ("trans" in m and "nat" in m): tot["Transf. Natasha"] += monto or 0
+        elif "maira" in m or ("trans" in m and "mai" in m):   tot["Transf. Maira"]   += monto or 0
+        else:                                            tot["Otro"]            += monto or 0
+    tot["_fisico"] = tot["Efectivo"] + tot["Cheque"] + tot["Dolares"]
+    tot["_total"]  = sum(v for k,v in tot.items() if not k.startswith("_"))
+    return tot
+
+def _ci(label, valor, color, extra=""):
+    vf = "${:,.0f}".format(valor).replace(",",".")
+    col = color if valor > 0 else "#ccc"
+    return (
+        '<div style="display:flex;flex-direction:column;align-items:center;background:var(--bg);'
+        'border-radius:8px;padding:8px 12px;min-width:90px;border:1.5px solid var(--border);' + extra + '">'
+        '<span style="font-size:.62rem;font-weight:700;color:var(--muted);text-transform:uppercase;'
+        'letter-spacing:.6px;margin-bottom:4px">' + label + '</span>'
+        '<span style="font-family:\'DM Serif Display\',serif;font-size:1.1rem;font-weight:600;color:' + col + '">' + vf + '</span>'
+        '</div>'
+    )
 
 @app.route("/caja", methods=["GET","POST"])
 @login_req
@@ -2004,60 +2024,127 @@ def caja():
     conn=conectar();c=conn.cursor();flash=""
     usuario=session.get("display","");rol=session.get("rol","secretaria")
     fecha_hoy=datetime.now().strftime("%d/%m/%Y")
+
     if request.method=="POST":
         accion=request.form.get("accion","")
         if accion=="cerrar_caja":
             c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s AND cerrado=TRUE",(fecha_hoy,usuario))
-            if c.fetchone(): flash='<div class="flash ferr">Ya cerraste tu caja hoy</div>'
+            if c.fetchone():
+                flash='<div class="flash ferr">Ya cerraste tu caja hoy</div>'
             else:
                 tot=_totales_caja(fecha_hoy,usuario)
-                c.execute("SELECT p.fecha,cl.nombre,p.monto,p.medio,p.observaciones FROM pagos p JOIN clientes cl ON cl.id=p.cliente_id WHERE p.fecha LIKE %s AND p.emitido_por=%s ORDER BY p.id",
-                          (f"%{fecha_hoy}%",usuario))
+                c.execute("SELECT p.fecha,cl.nombre,p.monto,p.medio,p.observaciones FROM pagos p JOIN clientes cl ON cl.id=p.cliente_id WHERE p.fecha LIKE %s AND p.emitido_por=%s ORDER BY p.id",(f"%{fecha_hoy}%",usuario))
                 pagos_dia=c.fetchall()
                 detalle=" | ".join(f"{p[1]}:{fmt(p[2])}({p[3]})" for p in pagos_dia)
                 c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s",(fecha_hoy,usuario))
                 existe=c.fetchone()
+                v=(tot["Efectivo"],tot["Cheque"],tot["Dolares"],tot["Transf. Natasha"],tot["Transf. Maira"],tot["Otro"],tot["_fisico"],tot["_total"],detalle,datetime.now().strftime("%H:%M"))
                 if existe:
-                    c.execute("UPDATE cierres_caja SET efectivo=%s,cheque=%s,dolares=%s,transferencia_nat=%s,transferencia_mai=%s,otro=%s,total_fisico=%s,total_general=%s,detalle_pagos=%s,cerrado=TRUE,hora_cierre=%s WHERE id=%s",
-                              (tot["Efectivo"],tot["Cheque"],tot["Dólares"],tot["Transferencia → Natasha Carlon"],tot["Transferencia → Maira Carlon"],tot["Otro"],tot["total_fisico"],tot["total_general"],detalle,datetime.now().strftime("%H:%M"),existe[0]))
+                    c.execute("UPDATE cierres_caja SET efectivo=%s,cheque=%s,dolares=%s,transferencia_nat=%s,transferencia_mai=%s,otro=%s,total_fisico=%s,total_general=%s,detalle_pagos=%s,cerrado=TRUE,hora_cierre=%s WHERE id=%s",v+(existe[0],))
                 else:
-                    c.execute("INSERT INTO cierres_caja(fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,detalle_pagos,cerrado,hora_cierre) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)",
-                              (fecha_hoy,usuario,tot["Efectivo"],tot["Cheque"],tot["Dólares"],tot["Transferencia → Natasha Carlon"],tot["Transferencia → Maira Carlon"],tot["Otro"],tot["total_fisico"],tot["total_general"],detalle,datetime.now().strftime("%H:%M")))
+                    c.execute("INSERT INTO cierres_caja(fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,detalle_pagos,cerrado,hora_cierre) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)",(fecha_hoy,usuario)+v)
                 conn.commit()
-                registrar_auditoria("CIERRE_CAJA",f"Total: {fmt(tot['total_general'])} | Fisico: {fmt(tot['total_fisico'])}")
-                flash=f'<div class="flash fok">Caja cerrada · Total: {fmt(tot["total_general"])}</div>'
+                registrar_auditoria("CIERRE_CAJA",f"Ef:{fmt(tot['Efectivo'])} Ch:{fmt(tot['Cheque'])} U$S:{fmt(tot['Dolares'])} Nat:{fmt(tot['Transf. Natasha'])} Mai:{fmt(tot['Transf. Maira'])} Total:{fmt(tot['_total'])}")
+                flash=f'<div class="flash fok">Caja cerrada · Efectivo: {fmt(tot["Efectivo"])} · Cheque: {fmt(tot["Cheque"])} · U$S: {fmt(tot["Dolares"])} · Nat: {fmt(tot["Transf. Natasha"])} · Maira: {fmt(tot["Transf. Maira"])} · <b>Total: {fmt(tot["_total"])}</b></div>'
+
     tot_hoy=_totales_caja(fecha_hoy,usuario)
     c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s AND cerrado=TRUE",(fecha_hoy,usuario))
     ya_cerro=bool(c.fetchone())
+
+    # Cobros del dia con saldo
+    c.execute("""SELECT cl.nombre,p.periodo,p.monto,p.medio,p.observaciones,
+                        COALESCE(cu.debe,0),COALESCE(cu.haber,0)
+                 FROM pagos p
+                 JOIN clientes cl ON cl.id=p.cliente_id
+                 LEFT JOIN cuentas cu ON cu.cliente_id=p.cliente_id AND cu.periodo=p.periodo
+                 WHERE p.fecha LIKE %s AND p.emitido_por=%s
+                 ORDER BY p.id DESC""",(f"%{fecha_hoy}%",usuario))
+    cobros_dia=c.fetchall()
+
     if rol=="admin":
-        c.execute("SELECT fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja ORDER BY id DESC LIMIT 30")
+        c.execute("SELECT fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja ORDER BY id DESC LIMIT 40")
     else:
         c.execute("SELECT fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE usuario=%s ORDER BY id DESC LIMIT 20",(usuario,))
-    cierres=c.fetchall();conn.close()
-    medios_hoy=[("Efectivo",tot_hoy["Efectivo"],"efectivo"),("Cheque",tot_hoy["Cheque"],"cheque"),("Dólares",tot_hoy["Dólares"],"dolares"),("Nat.",tot_hoy["Transferencia → Natasha Carlon"],"transferencia"),("Maira",tot_hoy["Transferencia → Maira Carlon"],"transferencia"),("Otro",tot_hoy["Otro"],"")]
-    items_hoy="".join(f'<div class="caja-item {cls}"><span class="ci-label">{lb}</span><span class="ci-val">{fmt(v)}</span></div>' for lb,v,cls in medios_hoy if v>0 or lb in ("Efectivo","Nat."))
-    items_hoy+=f'<div class="caja-item total-fisico"><span class="ci-label">Físico</span><span class="ci-val">{fmt(tot_hoy["total_fisico"])}</span></div>'
-    estado_badge='<span class="estado-cerrada">✓ Cerrada</span>' if ya_cerro else '<span class="estado-abierta">● Abierta</span>'
+    cierres=c.fetchall(); conn.close()
+
+    # Items caja hoy - todos los medios siempre visibles
+    items_hoy = (
+        _ci("Efectivo",        tot_hoy["Efectivo"],        "#27AE60") +
+        _ci("Cheque",          tot_hoy["Cheque"],          "#2475B0") +
+        _ci("Dolares U$S",     tot_hoy["Dolares"],         "#E67E22") +
+        _ci("Trans. Natasha",  tot_hoy["Transf. Natasha"], "#1A3A2A") +
+        _ci("Trans. Maira",    tot_hoy["Transf. Maira"],   "#7B68EE") +
+        _ci("Otro",            tot_hoy["Otro"],            "#888") +
+        _ci("Fisico",          tot_hoy["_fisico"],         "#1A3A2A", "border:2px solid var(--primary)") +
+        _ci("TOTAL DIA",       tot_hoy["_total"],          "#C8A96E", "border:2px solid var(--accent)")
+    )
+
+    estado_badge='<span class="estado-cerrada">Cerrada</span>' if ya_cerro else '<span class="estado-abierta">Abierta</span>'
+
+    # Tabla cobros del dia
+    if cobros_dia:
+        filas_c=""
+        for row in cobros_dia:
+            nm,per,monto,medio,obs,debe,haber=row
+            saldo=max(debe-haber,0)
+            cm={"Efectivo":"#27AE60","Cheque":"#2475B0","Dolares":"#E67E22"}.get(medio,"#7B68EE")
+            sd=(f'<span style="color:var(--danger);font-weight:700;font-size:.78rem">Saldo: {fmt(saldo)}</span>'
+                if saldo>0.5 else
+                '<span style="color:var(--success);font-size:.78rem;font-weight:700">Al dia</span>')
+            filas_c+=(f'<tr><td class="nm">{nm}</td><td class="mu">{per}</td>'
+                     f'<td style="font-weight:700;color:var(--success)">{fmt(monto)}</td>'
+                     f'<td><span style="background:#f0f4ff;color:{cm};font-size:.72rem;padding:2px 7px;border-radius:8px;font-weight:700">{medio}</span></td>'
+                     f'<td class="mu">{obs or "---"}</td>'
+                     f'<td>{sd}</td></tr>')
+        tabla_cobros=(f'<div class="fcard" style="margin-bottom:16px"><h3>Cobros del dia ({len(cobros_dia)})</h3>'
+                     f'<div class="dtable"><table><thead><tr><th>Cliente</th><th>Periodo</th>'
+                     f'<th>Cobrado</th><th>Medio</th><th>Observaciones</th><th>Saldo pendiente</th></tr></thead>'
+                     f'<tbody>{filas_c}</tbody></table></div></div>')
+    else:
+        tabla_cobros='<div class="info-box" style="margin-bottom:16px">Sin cobros registrados hoy.</div>'
+
+    # Historial
     cierre_html=""
     for ci in cierres:
-        fecha_ci,usr_ci,ef,ch,dol,nat,mai,otro,tf,tg,cerr,hora=ci
-        medios_ci=[("Ef",ef,"efectivo"),("Ch",ch,"cheque"),("U$S",dol,"dolares"),("Nat",nat,"transferencia"),("Maira",mai,"transferencia"),("Otro",otro,"")]
-        items_ci="".join(f'<div class="caja-item {cls}" style="min-width:60px;padding:5px 8px"><span class="ci-label">{lb}</span><span class="ci-val" style="font-size:.9rem">{fmt(v)}</span></div>' for lb,v,cls in medios_ci if v>0)
-        items_ci+=f'<div class="caja-item total-fisico" style="min-width:60px;padding:5px 8px"><span class="ci-label">Total</span><span class="ci-val" style="font-size:.9rem">{fmt(tg)}</span></div>'
-        est='<span class="estado-cerrada">✓ {hora}</span>' if cerr else '<span class="estado-abierta">Abierta</span>'
-        cierre_html+=f'<div class="caja-row {"" if cerr else ""}"><div class="caja-header"><div><span class="caja-user">{usr_ci}</span><span class="caja-fecha"> · {fecha_ci}</span></div>{est}</div><div class="caja-medios">{items_ci}</div></div>'
-    btn_cierre='' if ya_cerro else '<form method="post"><input type="hidden" name="accion" value="cerrar_caja"><button class="btn btn-r" onclick="return confirm(\'¿Cerrar caja del día?\')">Cerrar Caja Hoy</button></form>'
-    body=f"""
-    <h1 class="page-title">Caja Diaria</h1><p class="page-sub">Cobros del día — {usuario} · {fecha_hoy}</p>{flash}
-    <div class="caja-row" style="margin-bottom:18px">
-      <div class="caja-header"><div><span class="caja-user">Mi caja hoy</span></div>{estado_badge}</div>
-      <div class="caja-medios">{items_hoy}</div>
-      <div style="margin-top:12px">{btn_cierre}</div>
-    </div>
-    <div class="fcard"><h3>Historial de cierres</h3>{cierre_html or '<p style="color:var(--muted);font-size:.84rem">Sin cierres</p>'}</div>"""
+        fci,uci,ef,ch,dol,nat,mai,otr,tf,tg,cerr,hora=ci
+        its=(_ci("Efectivo",ef or 0,"#27AE60","min-width:72px;padding:5px 8px")+
+             _ci("Cheque",ch or 0,"#2475B0","min-width:72px;padding:5px 8px")+
+             _ci("U$S",dol or 0,"#E67E22","min-width:72px;padding:5px 8px")+
+             _ci("Natasha",nat or 0,"#1A3A2A","min-width:72px;padding:5px 8px")+
+             _ci("Maira",mai or 0,"#7B68EE","min-width:72px;padding:5px 8px")+
+             _ci("Fisico",tf or 0,"#1A3A2A","min-width:72px;padding:5px 8px;border:2px solid var(--primary)")+
+             _ci("TOTAL",tg or 0,"#C8A96E","min-width:80px;padding:5px 8px;border:2px solid var(--accent)"))
+        est=(f'<span class="estado-cerrada">Cerrada {hora}</span>' if cerr
+             else '<span class="estado-abierta">Abierta</span>')
+        cierre_html+=(f'<div class="caja-row"><div class="caja-header">'
+                     f'<div><span class="caja-user">{uci}</span><span class="caja-fecha"> · {fci}</span></div>'
+                     f'{est}</div>'
+                     f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its}</div></div>')
+
+    btn_cierre=('' if ya_cerro else
+               '<form method="post" style="margin-top:14px">'
+               '<input type="hidden" name="accion" value="cerrar_caja">'
+               '<button class="btn btn-r" onclick="return confirm(\'Cerrar caja del dia?\')">Cerrar Caja Hoy</button>'
+               '</form>')
+
+    body=(f'<h1 class="page-title">Caja Diaria</h1>'
+          f'<p class="page-sub">Cobros del dia — {usuario} · {fecha_hoy}</p>'
+          f'{flash}'
+          f'<div class="fcard" style="margin-bottom:16px">'
+          f'<div style="display:flex;justify-content:space-between;align-items:center;'
+          f'margin-bottom:14px;flex-wrap:wrap;gap:8px">'
+          f'<span style="font-family:\'DM Serif Display\',serif;font-size:1.1rem;color:var(--primary)">Mi caja hoy</span>'
+          f'{estado_badge}</div>'
+          f'<div style="display:flex;gap:8px;flex-wrap:wrap">{items_hoy}</div>'
+          f'{btn_cierre}'
+          f'</div>'
+          f'{tabla_cobros}'
+          f'<div class="fcard"><h3>Historial de cierres</h3>'
+          f'{cierre_html or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin cierres</p>"}'
+          f'</div>')
     return page("Caja",body,"Caja")
 
-# ══════════════════════════════════════════════════════════════════════════════
+
 #  REPORTES
 # ══════════════════════════════════════════════════════════════════════════════
 @app.route("/reportes")
