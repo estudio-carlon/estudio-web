@@ -1803,19 +1803,51 @@ def cuenta(id):
     c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
     historial=c.fetchall();conn.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
+    cuit_limpio=(cuit or "").replace("-","").replace(" ","")
+    telefono=(tel or "").replace(" ","").replace("+","").strip()
     filas=""
     for d in datos:
         saldo=d[1]-d[2]
-        if saldo<=0: badge='<span class="badge bp">PAGADO</span>'
-        elif d[2]>0: badge=f'<span class="badge bpar">PARCIAL - debe {fmt(saldo)}</span>'
-        else: badge=f'<span class="badge bd">DEBE {fmt(saldo)}</span>'
-        telefono=(tel or "").replace(" ","").replace("+","").strip()
-        wa_msg=f"Hola {nombre}, tiene deuda de {fmt(saldo)} del periodo {d[0]}. Transferir al CBU 0110420630042013452529 Alias: ESTUDIO.CONTA.CARLON"
-        wa_link=f"https://wa.me/{telefono}?text={wa_msg.replace(' ','%20')}" if telefono else "#"
+        if saldo<=0:
+            badge='<span class="badge bp">PAGADO</span>'
+        elif d[2]>0:
+            badge='<span class="badge bpar">PARCIAL - debe '+fmt(saldo)+'</span>'
+        else:
+            badge='<span class="badge bd">DEBE '+fmt(saldo)+'</span>'
         pu=d[0].replace("/","-")
-        btn_p=f'<button onclick="abrirPago(\'{d[0]}\',{saldo})" class="btn btn-xs btn-g">Pagar</button>' if saldo>0 else '<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
-        filas+=f'<div class="arow"><span class="period">{d[0]}</span><span style="font-size:.86rem">{fmt(d[2] if d[2]>0 else d[1])}</span>{badge}<div style="display:flex;gap:5px;flex-wrap:wrap"><a href="/recibo/{id}/{pu}" target="_blank" class="btn btn-xs btn-o">Ver</a><a href="/recibo/{id}/{pu}?download=1" class="btn btn-xs btn-o">PDF</a>{btn_p}<a href="https://afip.gob.ar/facturacion/" target="_blank" class="btn btn-xs btn-arca">ARCA</a>{"<a href="+chr(39)+wa_link+chr(39)+" target=_blank class=btn btn-xs btn-wa>WA</a>" if telefono else ""}</div></div>'
-    hist_rows=""
+        if saldo>0.5:
+            btn_p='<button onclick="abrirPago(''+d[0]+'','+str(round(saldo))+')" class="btn btn-xs btn-g">Pagar</button>'
+        else:
+            btn_p='<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
+        if cuit_limpio:
+            btn_arca='<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
+        else:
+            btn_arca=""
+        if telefono and saldo>0.5:
+            btn_wa='<button onclick="abrirWA(''+d[0]+'','+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
+        else:
+            btn_wa=""
+        filas+=(
+            '<div class="arow">'
+            '<span class="period">'+d[0]+'</span>'
+            '<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'
+            +badge+
+            '<div style="display:flex;gap:5px;flex-wrap:wrap">'
+            '<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
+            '<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
+            +btn_p+btn_arca+btn_wa+
+            '</div></div>'
+        )
+        btn_arca=('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
+                  if cuit_limpio else "")
+        btn_wa=('<button onclick="abrirWA(\''  +d[0]+'\','+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
+                if telefono and saldo>0.5 else "")
+        filas+=('<div class="arow"><span class="period">'+d[0]+'</span>'
+                '<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'+badge+
+                '<div style="display:flex;gap:5px;flex-wrap:wrap">'
+                '<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
+                '<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
+                +btn_p+btn_arca+btn_wa+'</div></div>')
     for h in historial:
         fact_b='<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>' if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>'
         emitido=h[7] or h[1]
@@ -1849,16 +1881,80 @@ def cuenta(id):
         <div class="fcard"><h3>Historial</h3>{hist_rows or '<p style="color:var(--muted);font-size:.84rem">Sin pagos</p>'}</div>
       </div>
     </div>
-    <div class="mo" id="mp"><div class="modal"><h3>Registrar Pago</h3><p class="msub" id="mp-sub"></p>
+    <!-- Modal pago rápido -->
+    <div class="mo" id="mp"><div class="modal">
+      <h3>💰 Registrar Pago</h3><p class="msub" id="mp-sub"></p>
       <form method="post">
         <input type="hidden" name="periodo" id="mp-per">
-        <div class="fg" style="margin-bottom:12px"><label>Monto</label><input name="pago" id="mp-monto" type="number" step="0.01"></div>
-        <div class="fg" style="margin-bottom:14px"><label>Medio</label><select name="medio">{medios_opts}</select></div>
-        <div class="mact"><button type="button" class="btn btn-o" onclick="closeM('mp')">Cancelar</button><button type="submit" class="btn btn-g">Pagar</button></div>
+        <div class="fg" style="margin-bottom:12px"><label>Monto $</label>
+          <input name="pago" id="mp-monto" type="number" step="0.01"></div>
+        <div class="fg" style="margin-bottom:14px"><label>Medio de pago</label>
+          <select name="medio">{medios_opts}</select></div>
+        <div class="mact">
+          <button type="button" class="btn btn-o" onclick="closeM('mp')">Cancelar</button>
+          <button type="submit" class="btn btn-g">Registrar</button>
+        </div>
       </form>
     </div></div>
+
+    <!-- Modal WA editable -->
+    <div class="mo" id="mwa"><div class="modal">
+      <h3>📱 Enviar WhatsApp</h3>
+      <p class="msub" id="mwa-sub"></p>
+      <div class="fg" style="margin-bottom:14px">
+        <label>Mensaje (podés editarlo antes de enviar)</label>
+        <textarea id="mwa-txt" rows="6"
+          style="padding:10px;border:1.5px solid var(--border);border-radius:8px;
+          font-family:'DM Sans',sans-serif;font-size:.85rem;width:100%;
+          resize:vertical;outline:none;background:var(--bg);line-height:1.55"></textarea>
+      </div>
+      <div class="info-box" style="margin-bottom:12px;font-size:.78rem">
+        Al hacer clic en <b>Enviar</b> se abre WhatsApp con el mensaje listo.
+        Podés modificarlo antes de enviarlo.
+      </div>
+      <div class="mact">
+        <button type="button" class="btn btn-o" onclick="closeM('mwa')">Cancelar</button>
+        <button type="button" class="btn btn-wa" onclick="enviarWA()">📱 Abrir WhatsApp</button>
+      </div>
+    </div></div>
+
     <script>
-    function abrirPago(p,s){{document.getElementById('mp-sub').textContent=p+' · Saldo: $'+Math.round(s).toLocaleString('es-AR');document.getElementById('mp-per').value=p;document.getElementById('mp-monto').value=Math.round(s);document.getElementById('mp').classList.add('on')}}
+    var _waTel = "{telefono}";
+    var _waNom = "{nombre.replace(chr(34),"").replace(chr(39),"")}";
+    var _waCuit = "{cuit or ""}";
+
+    function abrirPago(p,s){{
+      document.getElementById('mp-sub').textContent=p+' · Saldo: $'+Math.round(s).toLocaleString('es-AR');
+      document.getElementById('mp-per').value=p;
+      document.getElementById('mp-monto').value=Math.round(s);
+      document.getElementById('mp').classList.add('on');
+    }}
+
+    function abrirWA(periodo, saldo){{
+      var fmt=function(n){{return '$'+Math.round(n).toLocaleString('es-AR');}};
+      var msg = "Hola " + _waNom + "! 👋\n\n"
+        + "Le informamos que registra un saldo pendiente de *" + fmt(saldo) + "* "
+        + "correspondiente al período " + periodo + " en concepto de honorarios profesionales.\n\n"
+        + "Para regularizar puede transferir a:\n"
+        + "🏦 Banco Nación\n"
+        + "CBU: 0110420630042013452529\n"
+        + "Alias: ESTUDIO.CONTA.CARLON\n"
+        + "Titular: Alexis Natasha Carlon\n\n"
+        + "Ante cualquier consulta estamos a disposición. Muchas gracias! 🙏\n"
+        + "— *Estudio Contable Carlon*";
+      document.getElementById('mwa-sub').textContent="Para: " + _waNom + " · " + periodo;
+      document.getElementById('mwa-txt').value=msg;
+      document.getElementById('mwa').classList.add('on');
+    }}
+
+    function enviarWA(){{
+      var msg=document.getElementById('mwa-txt').value.trim();
+      if(!msg)return;
+      var num="54"+_waTel.replace(/[^0-9]/g,'');
+      window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+      closeM('mwa');
+    }}
+
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
     </script>
