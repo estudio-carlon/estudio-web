@@ -1559,8 +1559,15 @@ def clientes():
             conn.commit();registrar_auditoria("NUEVO CLIENTE",f"CUIT:{cuit} Cond:{condicion} Hon:{fmt(abono)}",row[0],nombre)
         flash=f'<div class="flash fok">✅ Cliente {nombre} agregado</div>'
 
-    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes ORDER BY nombre")
-    data_raw=c.fetchall();conn.close();es_admin=session.get("rol")=="admin"
+    tab_cl=request.args.get("tab","activos")
+    if tab_cl=="baja":
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes WHERE activo=FALSE ORDER BY nombre")
+    else:
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
+    data_raw=c.fetchall()
+    # count baja
+    c.execute("SELECT COUNT(*) FROM clientes WHERE activo=FALSE");n_baja=c.fetchone()[0]
+    conn.close();es_admin=session.get("rol")=="admin"
     rows=""
     for d in data_raw:
         cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f=d
@@ -1573,7 +1580,14 @@ def clientes():
         btn_arca=('<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar ARCA">ARCA</a>'
                  +('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 7px;font-size:.68rem;border-radius:6px">Const.</a>' if cuit_limpio else ""))
         btn_iibb=f'<a href="http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit={cuit_limpio}" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px" title="IIBB Rentas SGO">IIBB</a>' if cuit_limpio else ""
-        btn_del=f'<button onclick="confBorrar({cid},{repr(nombre.replace(chr(39),""))},event)" class="btn btn-xs btn-r">🗑</button>' if es_admin else ""
+        if es_admin:
+            if tab_cl=="baja":
+                btn_del=('<a href="/reactivar_cliente/'+str(cid)+'" class="btn btn-xs btn-g">Reactivar</a>'
+                         +'<a href="/borrar_cliente/'+str(cid)+'" class="btn btn-xs btn-r" title="Eliminar">&#128465;</a>')
+            else:
+                btn_del='<a href="/baja_cliente/'+str(cid)+'" class="btn btn-xs btn-o" title="Dar de baja">Dar de baja</a>'
+        else:
+            btn_del=''
         rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
           <td class="nm">{nombre}{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
           <td class="mu">{cuit_d or "---"}<br>{cond_badge}</td>
@@ -1594,15 +1608,21 @@ def clientes():
     modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM(&apos;mb&apos;)">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
     n_ri=sum(1 for d in data_raw if d[8])
     n_wa=sum(1 for d in data_raw if d[9])
+    form_nuevo_cli='<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""
+    form_cierre_cli='      </div>\n    </form></div>' if tab_cl=="activos" else ""
     body=f"""
     <h1 class="page-title">Clientes</h1>
-    <p class="page-sub">{len(data_raw)} clientes · {n_ri} Resp. Inscriptos · {n_wa} con WA activo</p>
+    <p class="page-sub">{"Dados de baja: "+str(len(data_raw))+" clientes" if tab_cl=="baja" else str(len(data_raw))+" clientes activos · "+str(n_ri)+" Resp. Inscriptos · "+str(n_wa)+" con WA"}</p>
     {flash}
-    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-      {btn_wa_masivo}
+    <div class="tabs" style="margin-bottom:0">
+      <button class="tab {"on" if tab_cl=="activos" else ""}" onclick="window.location.href='/clientes?tab=activos'">👥 Activos ({len(data_raw) if tab_cl=="activos" else ""})</button>
+      <button class="tab {"on" if tab_cl=="baja" else ""}" onclick="window.location.href='/clientes?tab=baja'">🚫 Dados de baja ({n_baja})</button>
+    </div>
+    <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap">
+      {btn_wa_masivo if tab_cl=="activos" else ""}
       <a href="/exportar/excel/clientes" class="btn btn-g btn-sm">📊 Excel Clientes</a>
     </div>
-    <div class="fcard"><h3>Nuevo Cliente</h3><form method="post">
+    {'<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""}
       <div class="fgrid">
         <div class="fg"><label>Nombre / Razón Social</label><input name="nombre" required placeholder="Garcia Juan"></div>
         <div class="fg"><label>CUIT</label><input name="cuit" placeholder="20-12345678-9" id="cuit-inp"></div>
@@ -1623,7 +1643,7 @@ def clientes():
         <button type="button" class="btn btn-arca btn-sm" onclick="buscarArca()">🔍 Ver constancia ARCA</button>
         <button type="button" class="btn btn-sm" style="background:#6a1b9a;color:#fff" onclick="buscarIIBB()">🔍 Ver constancia IIBB</button>
       </div>
-    </form></div>
+    {form_cierre_cli}
     <div class="search"><span>🔍</span><input id="bus" placeholder="Buscar por nombre, CUIT, actividad..." oninput="filt(this.value)"></div>
     <div class="dtable"><table>
       <thead><tr><th>Nombre</th><th>CUIT / Cond.</th><th>Teléfono</th><th>Email</th><th>Honorarios</th><th>Acciones</th></tr></thead>
@@ -1985,6 +2005,26 @@ def wa_facturas_preview():
     </form>"""
     return page("WhatsApp", body, "Clientes")
 
+
+@app.route("/baja_cliente/<int:id>")
+@admin_req
+def baja_cliente(id):
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(id,));row=c.fetchone();nombre=row[0] if row else "?"
+    c.execute("UPDATE clientes SET activo=FALSE WHERE id=%s",(id,))
+    conn.commit();conn.close()
+    registrar_auditoria("BAJA_CLIENTE",f"{nombre} dado de baja",id,nombre)
+    return redirect("/clientes")
+
+@app.route("/reactivar_cliente/<int:id>")
+@admin_req
+def reactivar_cliente(id):
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(id,));row=c.fetchone();nombre=row[0] if row else "?"
+    c.execute("UPDATE clientes SET activo=TRUE WHERE id=%s",(id,))
+    conn.commit();conn.close()
+    registrar_auditoria("REACTIVAR_CLIENTE",f"{nombre} reactivado",id,nombre)
+    return redirect("/clientes?tab=baja")
 
 @app.route("/borrar_cliente/<int:id>")
 @admin_req
@@ -3014,42 +3054,100 @@ def generar_pdf(cliente_id, periodo, monto):
     c.execute("SELECT nombre,cuit FROM clientes WHERE id=%s",(cliente_id,))
     data=c.fetchone();conn.close()
     cli_nombre=data[0] if data else "—";cuit_cli=dec(data[1]) if data else ""
-    cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(0,h-130,w,130,fill=1,stroke=0)
+
+    # ── Encabezado verde ──────────────────────────────────────────────────────
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(0,h-140,w,140,fill=1,stroke=0)
+
+    # Logo más grande (BN se ve bien en blanco)
+    logo_dibujado=False
     for lp in ["logo.png","static/logo.png"]:
         if os.path.exists(lp):
-            try: cv.drawImage(ImageReader(lp),36,h-115,width=90,height=50,preserveAspectRatio=True,mask="auto")
+            try:
+                cv.drawImage(ImageReader(lp),28,h-128,width=115,height=110,
+                             preserveAspectRatio=True,mask="auto")
+                logo_dibujado=True
             except: pass
             break
-    cv.setFillColorRGB(0.78,0.66,0.43);cv.setFont("Helvetica-Bold",20);cv.drawString(148,h-58,"RECIBO DE PAGO")
-    cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica",8.5);cv.drawString(148,h-76,"Estudio Contable Carlon — Servicios Contables e Impositivos")
+    # Si no hay logo, texto del estudio grande
+    if not logo_dibujado:
+        cv.setFillColorRGB(0.78,0.66,0.43)
+        cv.setFont("Helvetica-Bold",26)
+        cv.drawString(28,h-55,"CARLON")
+        cv.setFont("Helvetica",9)
+        cv.setFillColorRGB(1,1,1)
+        cv.drawString(28,h-70,"ESTUDIO CONTABLE")
+
+    # Titulo y datos al lado del logo
+    x_txt = 158
+    cv.setFillColorRGB(0.78,0.66,0.43);cv.setFont("Helvetica-Bold",22)
+    cv.drawString(x_txt,h-52,"RECIBO DE PAGO")
+    cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica",8.5)
+    cv.drawString(x_txt,h-68,"Estudio Contable Carlon — Servicios Contables e Impositivos")
     numero=datetime.now().strftime("%Y%m%d%H%M%S")
-    cv.setFont("Helvetica-Bold",9);cv.drawRightString(w-36,h-50,f"N° {numero}")
+    cv.setFont("Helvetica-Bold",9);cv.drawRightString(w-36,h-52,f"N° {numero}")
     cv.setFont("Helvetica",8);cv.drawRightString(w-36,h-66,datetime.now().strftime("%d/%m/%Y %H:%M"))
-    cv.setFillColorRGB(0.15,0.15,0.15);cv.setFont("Helvetica-Bold",8.5);cv.drawString(36,h-153,"EMISOR")
-    cv.setFont("Helvetica",8.5);cv.drawString(36,h-168,"Estudio Contable Carlon  ·  CUIT: 27-35045505-7")
-    cv.drawString(36,h-181,"Absalón Rojas s/n  ·  Quimilí, Santiago del Estero  ·  CP 3740")
-    cv.setStrokeColorRGB(0.87,0.87,0.87);cv.line(36,h-195,w-36,h-195)
-    cv.setFillColorRGB(0.53,0.53,0.53);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-215,"CLIENTE")
-    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",13);cv.drawString(36,h-232,cli_nombre)
-    cv.setFont("Helvetica",8.5);cv.setFillColorRGB(0.3,0.3,0.3);cv.drawString(36,h-248,f"CUIT: {cuit_cli or '—'}   ·   Periodo: {periodo}")
-    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,h-315,w-72,55,8,fill=1,stroke=0)
-    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",10);cv.drawString(54,h-277,"TOTAL ABONADO")
-    cv.setFont("Helvetica-Bold",22)
+
+    # ── Emisor ─────────────────────────────────────────────────────────────────
+    cv.setFillColorRGB(0.15,0.15,0.15);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-160,"EMISOR")
+    cv.setFont("Helvetica",8.5);cv.drawString(36,h-174,"Estudio Contable Carlon  ·  CUIT: 27-35045505-7")
+    cv.drawString(36,h-186,"Absalón Rojas s/n  ·  Quimilí, Santiago del Estero  ·  CP 3740")
+    cv.setStrokeColorRGB(0.87,0.87,0.87);cv.line(36,h-198,w-36,h-198)
+
+    # ── Cliente ────────────────────────────────────────────────────────────────
+    cv.setFillColorRGB(0.53,0.53,0.53);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-216,"CLIENTE")
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",14);cv.drawString(36,h-234,cli_nombre)
+    cv.setFont("Helvetica",8.5);cv.setFillColorRGB(0.3,0.3,0.3)
+    cv.drawString(36,h-250,f"CUIT: {cuit_cli or '—'}   ·   Periodo: {periodo}")
+
+    # ── Monto ──────────────────────────────────────────────────────────────────
+    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,h-320,w-72,55,8,fill=1,stroke=0)
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",10);cv.drawString(54,h-282,"TOTAL ABONADO")
+    cv.setFont("Helvetica-Bold",24)
     try: mf=f"$ {float(monto):,.0f}".replace(",",".")
     except: mf=f"$ {monto}"
-    cv.drawRightString(w-54,h-277,mf)
-    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.45,0.45,0.45);cv.drawString(36,h-334,"Recibí conforme el importe indicado en concepto de honorarios profesionales.")
-    cv.setStrokeColorRGB(0.72,0.72,0.72);cv.line(36,h-390,195,h-390);cv.line(w-195,h-390,w-36,h-390)
-    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.5,0.5,0.5);cv.drawString(36,h-403,"Firma");cv.drawString(w-195,h-403,"Aclaración")
-    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,36,(w-72)*0.6,115,8,fill=1,stroke=0)
-    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",8.5);cv.drawString(52,140,"DATOS PARA TRANSFERENCIA")
-    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.2,0.2,0.2)
-    for i,ln in enumerate(["Titular: Alexis Natasha Carlon","CUIL: 27-35045505-7  ·  Banco: Nación","Cuenta: CA $ 28324201345252","CBU: 0110420630042013452529","Alias: ESTUDIO.CONTA.CARLON"]):
-        cv.drawString(52,124-i*14,ln)
-    qr=qrcode.make(f"CBU:0110420630042013452529\nAlias:ESTUDIO.CONTA.CARLON\nMonto:{monto}\nCliente:{cli_nombre}\nPeriodo:{periodo}")
-    qb=BytesIO();qr.save(qb);qb.seek(0)
-    cv.drawImage(ImageReader(qb),w-148,34,width=106,height=106)
-    cv.setFont("Helvetica-Bold",7.5);cv.setFillColorRGB(0.10,0.23,0.16);cv.drawCentredString(w-95,28,"Escaneá para pagar")
+    cv.drawRightString(w-54,h-282,mf)
+    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.45,0.45,0.45)
+    cv.drawString(36,h-338,"Recibí conforme el importe indicado en concepto de honorarios profesionales.")
+
+    # ── Firmas ─────────────────────────────────────────────────────────────────
+    cv.setStrokeColorRGB(0.72,0.72,0.72)
+    cv.line(36,h-400,195,h-400);cv.line(w-195,h-400,w-36,h-400)
+    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.5,0.5,0.5)
+    cv.drawString(36,h-413,"Firma");cv.drawString(w-195,h-413,"Aclaración")
+
+    # ── Datos bancarios ────────────────────────────────────────────────────────
+    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,36,int((w-72)*0.62),118,8,fill=1,stroke=0)
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",9);cv.drawString(52,144,"DATOS PARA TRANSFERENCIA")
+    cv.setFont("Helvetica",8.5);cv.setFillColorRGB(0.2,0.2,0.2)
+    for i,ln in enumerate([
+        "Titular: Alexis Natasha Carlon",
+        "CUIL: 27-35045505-7  ·  Banco Nacion Argentina",
+        "Cuenta Ahorro $ 28324201345252",
+        "CBU: 0110420630042013452529",
+        "Alias: ESTUDIO.CONTA.CARLON"
+    ]):
+        cv.drawString(52,126-i*16,ln)
+
+    # ── QR → link BNA+ para transferir ────────────────────────────────────────
+    # BNA+ transfiere via alias: link universal que abre la app del banco
+    try:
+        monto_int=int(float(monto))
+    except:
+        monto_int=0
+    # Link de transferencia BNA+ (alias directo)
+    bna_link=f"https://bna.com.ar/Personas/TransferirDinero?alias=ESTUDIO.CONTA.CARLON&monto={monto_int}"
+    qr=qrcode.QRCode(version=1,error_correction=qrcode.constants.ERROR_CORRECT_L,
+                     box_size=6,border=2)
+    qr.add_data(bna_link)
+    qr.make(fit=True)
+    qr_img=qr.make_image(fill_color="black",back_color="white")
+    qb=BytesIO();qr_img.save(qb,"PNG");qb.seek(0)
+    qr_x=w-150;qr_y=30;qr_sz=116
+    cv.setFillColorRGB(1,1,1);cv.roundRect(qr_x-5,qr_y-5,qr_sz+10,qr_sz+10,6,fill=1,stroke=0)
+    cv.drawImage(ImageReader(qb),qr_x,qr_y,width=qr_sz,height=qr_sz)
+    cv.setFont("Helvetica-Bold",7.5);cv.setFillColorRGB(0.10,0.23,0.16)
+    cv.drawCentredString(qr_x+qr_sz//2,qr_y-12,"Escaneá para transferir (BNA+)")
+
     cv.save();buffer.seek(0);return buffer
 
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
