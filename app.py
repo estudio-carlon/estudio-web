@@ -885,8 +885,6 @@ def panel():
       }})
       .catch(()=>{{document.getElementById("dolar-val").textContent="Sin conexion";}});
     </script>
-    <div id="dolar-bar" style="background:var(--card);border-radius:var(--r);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Dólar BNA hoy</span><div id="dolar-val" style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary)">cargando...</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Compra</span><div id="dolar-cmp" style="font-size:.95rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Venta</span><div id="dolar-vta" style="font-size:.95rem;font-weight:600;color:var(--danger)">---</div></div></div><div style="text-align:right"><div id="reloj" style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)"></div><div id="fecha-hoy" style="font-size:.74rem;color:var(--muted)"></div></div></div>
-    <script>
     // Reloj en tiempo real
     function tick(){{
       var n=new Date();
