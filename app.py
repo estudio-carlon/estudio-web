@@ -2462,6 +2462,23 @@ def caja():
 
     if request.method=="POST":
         accion=request.form.get("accion","")
+        if accion=="editar_cierre" and rol=="admin":
+            cid_e=request.form.get("cierre_id")
+            ef2=float(request.form.get("ef",0) or 0)
+            ch2=float(request.form.get("ch",0) or 0)
+            dol2=float(request.form.get("dol",0) or 0)
+            nat2=float(request.form.get("nat",0) or 0)
+            mai2=float(request.form.get("mai",0) or 0)
+            otr2=float(request.form.get("otr",0) or 0)
+            fisico2=ef2+ch2+dol2
+            total2=ef2+ch2+dol2+nat2+mai2+otr2
+            c.execute("UPDATE cierres_caja SET efectivo=%s,cheque=%s,dolares=%s,transferencia_nat=%s,transferencia_mai=%s,otro=%s,total_fisico=%s,total_general=%s WHERE id=%s",
+                      (ef2,ch2,dol2,nat2,mai2,otr2,fisico2,total2,cid_e))
+            conn.commit()
+            registrar_auditoria("EDITAR_CIERRE_CAJA",
+                f"Cierre #{cid_e} editado: Ef:{fmt(ef2)} Ch:{fmt(ch2)} U$S:{fmt(dol2)} Nat:{fmt(nat2)} Mai:{fmt(mai2)} Total:{fmt(total2)}")
+            flash=f'<div class="flash fok">✅ Cierre editado · Nat: {fmt(nat2)} · Maira: {fmt(mai2)} · Total: {fmt(total2)}</div>'
+
         if accion=="cerrar_caja":
             c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s AND cerrado=TRUE",(fecha_hoy,usuario))
             if c.fetchone():
@@ -2497,9 +2514,9 @@ def caja():
     cobros_dia=c.fetchall()
 
     if rol=="admin":
-        c.execute("SELECT fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja ORDER BY id DESC LIMIT 40")
+        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja ORDER BY id DESC LIMIT 40")
     else:
-        c.execute("SELECT fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE usuario=%s ORDER BY id DESC LIMIT 20",(usuario,))
+        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE usuario=%s ORDER BY id DESC LIMIT 20",(usuario,))
     cierres=c.fetchall(); conn.close()
 
     # Items caja hoy - todos los medios siempre visibles
@@ -2540,8 +2557,9 @@ def caja():
 
     # Historial
     cierre_html=""
+    es_adm=session.get("rol")=="admin"
     for ci in cierres:
-        fci,uci,ef,ch,dol,nat,mai,otr,tf,tg,cerr,hora=ci
+        cid_c,fci,uci,ef,ch,dol,nat,mai,otr,tf,tg,cerr,hora=ci
         its=(_ci("Efectivo",ef or 0,"#27AE60","min-width:72px;padding:5px 8px")+
              _ci("Cheque",ch or 0,"#2475B0","min-width:72px;padding:5px 8px")+
              _ci("U$S",dol or 0,"#E67E22","min-width:72px;padding:5px 8px")+
@@ -2551,9 +2569,16 @@ def caja():
              _ci("TOTAL",tg or 0,"#C8A96E","min-width:80px;padding:5px 8px;border:2px solid var(--accent)"))
         est=(f'<span class="estado-cerrada">Cerrada {hora}</span>' if cerr
              else '<span class="estado-abierta">Abierta</span>')
+        btn_editar_caja=(
+            f'<button data-cid="{cid_c}" data-ef="{ef or 0}" data-ch="{ch or 0}"'
+            f' data-dol="{dol or 0}" data-nat="{nat or 0}" data-mai="{mai or 0}"'
+            f' data-otr="{otr or 0}" data-fci="{fci}" data-uci="{uci}"'
+            f' class="btn btn-xs btn-o cajEditBtn" title="Editar cierre">✏️ Editar</button>'
+        ) if es_adm else ""
         cierre_html+=(f'<div class="caja-row"><div class="caja-header">'
                      f'<div><span class="caja-user">{uci}</span><span class="caja-fecha"> · {fci}</span></div>'
-                     f'{est}</div>'
+                     f'<div style="display:flex;align-items:center;gap:8px">{est}{btn_editar_caja}</div>'
+                     f'</div>'
                      f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its}</div></div>')
 
     btn_cierre=('' if ya_cerro else
@@ -2561,6 +2586,51 @@ def caja():
                '<input type="hidden" name="accion" value="cerrar_caja">'
                '<button class="btn btn-r" onclick="return confirm(\'Cerrar caja del dia?\')">Cerrar Caja Hoy</button>'
                '</form>')
+
+    # Modal editar cierre (solo admin)
+    medios_caja_edit=MEDIOS_PAGO
+    modal_editar_caja=f"""
+    <div class="mo" id="mec"><div class="modal" style="max-width:560px">
+      <h3>✏️ Editar Cierre de Caja</h3>
+      <p class="msub" id="mec-sub"></p>
+      <form method="post">
+        <input type="hidden" name="accion" value="editar_cierre">
+        <input type="hidden" name="cierre_id" id="mec-id">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div class="fg"><label>Efectivo $</label><input name="ef" id="mec-ef" type="number" step="0.01"></div>
+          <div class="fg"><label>Cheque $</label><input name="ch" id="mec-ch" type="number" step="0.01"></div>
+          <div class="fg"><label>Dólares U$S $</label><input name="dol" id="mec-dol" type="number" step="0.01"></div>
+          <div class="fg"><label>Trans. Natasha $</label><input name="nat" id="mec-nat" type="number" step="0.01"></div>
+          <div class="fg"><label>Trans. Maira $</label><input name="mai" id="mec-mai" type="number" step="0.01"></div>
+          <div class="fg"><label>Otro $</label><input name="otr" id="mec-otr" type="number" step="0.01"></div>
+        </div>
+        <div class="info-box" style="margin-bottom:12px;font-size:.78rem">
+          Los totales Físico y Total se recalculan automáticamente al guardar.
+        </div>
+        <div class="mact">
+          <button type="button" class="btn btn-o" onclick="closeM('mec')">Cancelar</button>
+          <button type="submit" class="btn btn-a">Guardar cambios</button>
+        </div>
+      </form>
+    </div></div>
+    <script>
+    document.addEventListener('click',function(e){{
+      var b=e.target.closest('.cajEditBtn');
+      if(!b)return;
+      document.getElementById('mec-id').value=b.dataset.cid;
+      document.getElementById('mec-sub').textContent=b.dataset.uci+' · '+b.dataset.fci;
+      document.getElementById('mec-ef').value=b.dataset.ef;
+      document.getElementById('mec-ch').value=b.dataset.ch;
+      document.getElementById('mec-dol').value=b.dataset.dol;
+      document.getElementById('mec-nat').value=b.dataset.nat;
+      document.getElementById('mec-mai').value=b.dataset.mai;
+      document.getElementById('mec-otr').value=b.dataset.otr;
+      document.getElementById('mec').classList.add('on');
+    }});
+    document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}));
+    function closeM(id){{document.getElementById(id).classList.remove('on')}}
+    </script>
+    """ if es_adm else ""
 
     body=(f'<h1 class="page-title">Caja Diaria</h1>'
           f'<p class="page-sub">Cobros del dia — {usuario} · {fecha_hoy}</p>'
@@ -2576,7 +2646,8 @@ def caja():
           f'{tabla_cobros}'
           f'<div class="fcard"><h3>Historial de cierres</h3>'
           f'{cierre_html or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin cierres</p>"}'
-          f'</div>')
+          f'</div>'
+          +modal_editar_caja)
     return page("Caja",body,"Caja")
 
 
