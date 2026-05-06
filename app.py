@@ -2097,8 +2097,7 @@ def cuenta(id):
                 if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>')
         emitido=h[7] or h[1]
         pid=h[8]
-        btn_edit=('<button onclick="editarPago('+str(pid)+',\''+h[2]+'\',\''+h[4]+'\',\''+str(h[3])+'\',\''+str(h[6] or "")+'\')" '
-                  +'class="btn btn-xs btn-o" style="margin-left:6px" title="Editar">✏️</button>')
+        btn_edit='<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>'
         hist_rows+=('<div class="logrow" style="justify-content:space-between;align-items:center">'
                     +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
                     +'<div class="log-dot"></div>'
@@ -2287,6 +2286,13 @@ def cuenta(id):
       document.getElementById('mep').classList.add('on');
       setTimeout(function(){{document.getElementById('mep-per').focus()}},100);
     }}
+    document.addEventListener('click',function(e){{
+      var eb=e.target.closest('.editBtn');
+      if(eb){{
+        editarPago(eb.dataset.pid,eb.dataset.per,eb.dataset.med,
+                   eb.dataset.mon,eb.dataset.obs);
+      }}
+    }});
 
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
