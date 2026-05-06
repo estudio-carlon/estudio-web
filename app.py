@@ -2001,6 +2001,26 @@ def cuenta(id):
         else:
             bw=""
         bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar pago de '+d[0]+'?\')" title="Eliminar">🗑</a>' if session.get('rol')=='admin' else '')
+        # link recibo publico para compartir
+        _base=os.getenv('BASE_URL','https://estudio-web-1.onrender.com')
+        recibo_url=_base+'/recibo/'+str(id)+'/'+per_esc
+        # WA compartir recibo
+        if telefono:
+            msg_rec=('Estimado/a '+nombre+', le enviamos el recibo de pago del periodo '+d[0]+'. '
+                     +'Puede verlo aqui: '+recibo_url+' '
+                     +'-- Estudio Contable Carlon')
+            bwr=('<a href="https://wa.me/54'+telefono+'?text='+urllib.parse.quote(msg_rec)+'" '
+                 +'target="_blank" class="btn btn-xs btn-wa" title="Enviar recibo por WA">📱 Recibo</a>')
+        else:
+            bwr=''
+        # Email compartir recibo
+        if email:
+            asunto=urllib.parse.quote('Recibo de pago '+d[0]+' - Estudio Carlon')
+            cuerpo=urllib.parse.quote('Estimado/a '+nombre+',\n\nAdjunto encontrara su recibo de pago del periodo '+d[0]+'.\n\nPuede verlo o descargarlo aqui:\n'+recibo_url+'\n\nMuchas gracias!\n-- Estudio Contable Carlon')
+            bem=('<a href="mailto:'+email+'?subject='+asunto+'&body='+cuerpo+'" '
+                 +'class="btn btn-xs btn-b" title="Enviar recibo por email">✉️ Email</a>')
+        else:
+            bem=''
         filas+=('<div class="arow">'
                +'<span class="period">'+d[0]+'</span>'
                +'<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'
@@ -2008,7 +2028,7 @@ def cuenta(id):
                +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
                +'<a href="/recibo/'+str(id)+'/'+per_esc+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
                +'<a href="/recibo/'+str(id)+'/'+per_esc+'?download=1" class="btn btn-xs btn-o">PDF</a>'
-               +bp+ba+bc+bw+bdel+'</div></div>')
+               +bwr+bem+bp+ba+bc+bw+bdel+'</div></div>')
     hist_rows=""
     for h in historial:
         fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
@@ -2764,7 +2784,6 @@ def generar_pdf(cliente_id, periodo, monto):
     cv.save();buffer.seek(0);return buffer
 
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
-@login_req
 def ver_recibo(cliente_id,periodo):
     periodo=periodo.replace("-","/")
     conn=conectar();c=conn.cursor()
