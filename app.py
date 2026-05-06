@@ -861,7 +861,7 @@ def panel():
     <h1 class="page-title">Panel General</h1>
     <p class="page-sub">Hola, <b>{session.get("display","")}</b> - {now_ar()}</p>
     {alertas}
-    <div id="dolar-bar" style="background:var(--card);border-radius:var(--r);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Dólar BNA hoy</span><div id="dolar-val" style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary)">cargando...</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Compra</span><div id="dolar-cmp" style="font-size:.95rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Venta</span><div id="dolar-vta" style="font-size:.95rem;font-weight:600;color:var(--danger)">---</div></div></div><div style="text-align:right"><div id="reloj" style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)"></div><div id="fecha-hoy" style="font-size:.74rem;color:var(--muted)"></div></div></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap"><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Divisa Cmp</span><div id="dolar-cmp" style="font-size:.88rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Divisa Vta</span><div id="dolar-vta" style="font-size:.88rem;font-weight:600;color:var(--danger)">---</div></div><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Billete Cmp</span><div id="dolar-bil-cmp" style="font-size:.88rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Billete Vta</span><div id="dolar-bil-vta" style="font-size:.88rem;font-weight:600;color:var(--danger)">---</div></div></div></div></div></div>
     <script>
     // Reloj en tiempo real
     function tick(){{
@@ -881,11 +881,20 @@ def panel():
     fetch("https://dolarapi.com/v1/dolares/oficial")
       .then(r=>r.json())
       .then(d=>{{
-        document.getElementById("dolar-val").textContent="Oficial BNA";
+        document.getElementById("dolar-val").textContent="BNA Divisa";
         document.getElementById("dolar-cmp").textContent="$"+d.compra.toLocaleString("es-AR",{{minimumFractionDigits:2}});
         document.getElementById("dolar-vta").textContent="$"+d.venta.toLocaleString("es-AR",{{minimumFractionDigits:2}});
       }})
       .catch(()=>{{document.getElementById("dolar-val").textContent="Sin conexion";}});
+    fetch("https://dolarapi.com/v1/dolares/bolsa")
+      .then(r=>r.json())
+      .then(d=>{{
+        var bilCmp=document.getElementById("dolar-bil-cmp");
+        var bilVta=document.getElementById("dolar-bil-vta");
+        if(bilCmp) bilCmp.textContent="$"+d.compra.toLocaleString("es-AR",{{minimumFractionDigits:2}});
+        if(bilVta) bilVta.textContent="$"+d.venta.toLocaleString("es-AR",{{minimumFractionDigits:2}});
+      }})
+      .catch(()=>{{}});
     </script>
     <div class="stats">
       <div class="scard"><div class="sicon">&#x1F4B0;</div><div class="slabel">Total Facturado</div><div class="sval">{fmt(td)}</div></div>
@@ -1608,14 +1617,15 @@ def clientes():
         btn_arca=('<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar ARCA">ARCA</a>'
                  +('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 7px;font-size:.68rem;border-radius:6px">Const.</a>' if cuit_limpio else ""))
         btn_iibb=f'<a href="http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit={cuit_limpio}" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px" title="IIBB Rentas SGO">IIBB</a>' if cuit_limpio else ""
-        if es_admin:
-            if tab_cl=="baja":
+        if tab_cl=="baja":
+            if es_admin:
                 btn_del=('<a href="/reactivar_cliente/'+str(cid)+'" class="btn btn-xs btn-g">Reactivar</a>'
-                         +'<a href="/borrar_cliente/'+str(cid)+'" class="btn btn-xs btn-r" title="Eliminar">&#128465;</a>')
+                         +'<a href="/borrar_cliente/'+str(cid)+'" class="btn btn-xs btn-r" title="Eliminar definitivo (admin)">&#128465;</a>')
             else:
-                btn_del='<a href="/baja_cliente/'+str(cid)+'" class="btn btn-xs btn-o" title="Dar de baja">Dar de baja</a>'
+                btn_del='<a href="/reactivar_cliente/'+str(cid)+'" class="btn btn-xs btn-g">Reactivar</a>'
         else:
-            btn_del=''
+            # Todos pueden dar de baja, solo admin puede eliminar
+            btn_del='<a href="/baja_cliente/'+str(cid)+'" class="btn btn-xs btn-o" title="Dar de baja">Dar de baja</a>'
         rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
           <td class="nm">{nombre}{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
           <td class="mu">{cuit_d or "---"}<br>{cond_badge}</td>
@@ -2042,7 +2052,7 @@ def wa_facturas_preview():
 
 
 @app.route("/baja_cliente/<int:id>")
-@admin_req
+@login_req
 def baja_cliente(id):
     conn=conectar();c=conn.cursor()
     c.execute("SELECT nombre FROM clientes WHERE id=%s",(id,));row=c.fetchone();nombre=row[0] if row else "?"
@@ -2052,7 +2062,7 @@ def baja_cliente(id):
     return redirect("/clientes")
 
 @app.route("/reactivar_cliente/<int:id>")
-@admin_req
+@login_req
 def reactivar_cliente(id):
     conn=conectar();c=conn.cursor()
     c.execute("SELECT nombre FROM clientes WHERE id=%s",(id,));row=c.fetchone();nombre=row[0] if row else "?"
@@ -2635,9 +2645,11 @@ def caja():
     cobros_dia=c.fetchall()
 
     if rol=="admin":
+        # Admin ve historial completo de todos
         c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja ORDER BY id DESC LIMIT 40")
     else:
-        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE usuario=%s ORDER BY id DESC LIMIT 20",(usuario,))
+        # Secretaria solo ve su propio historial (sin acumular dias anteriores en totales)
+        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE usuario=%s AND fecha=%s ORDER BY id DESC LIMIT 5",(usuario,fecha_hoy))
     cierres=c.fetchall(); conn.close()
 
     # Items caja hoy - todos los medios siempre visibles
@@ -2702,11 +2714,12 @@ def caja():
                      f'</div>'
                      f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its}</div></div>')
 
-    btn_cierre=('' if ya_cerro else
-               '<form method="post" style="margin-top:14px">'
-               '<input type="hidden" name="accion" value="cerrar_caja">'
-               '<button class="btn btn-r" onclick="return confirm(\'Cerrar caja del dia?\')">Cerrar Caja Hoy</button>'
-               '</form>')
+    if ya_cerro:
+        btn_cierre='<div class="info-box" style="margin-top:12px">Caja cerrada hoy. Manana se abre automaticamente.</div>'
+    else:
+        btn_cierre=('<form method="post" style="margin-top:14px"><input type="hidden" name="accion" value="cerrar_caja">'
+                   '<button class="btn btn-r btn-sm" onclick="return confirm(\'Cerrar caja del dia?\')">'
+                   'Cerrar Caja del Dia</button></form>')
 
     # Modal editar cierre (solo admin)
     medios_caja_edit=MEDIOS_PAGO
@@ -2753,6 +2766,33 @@ def caja():
     </script>
     """ if es_adm else ""
 
+
+    # Admin: ver cajas en tiempo real de todas las secretarias
+    cajas_live = ""
+    if rol == "admin":
+        conn2=conectar();c2=conn2.cursor()
+        c2.execute("SELECT DISTINCT emitido_por FROM pagos WHERE fecha LIKE %s AND emitido_por IS NOT NULL",(fecha_hoy+"%",))
+        usuarios_activos=[r[0] for r in c2.fetchall() if r[0] and r[0]!=usuario]
+        for uact in usuarios_activos:
+            t=_totales_caja(fecha_hoy,uact)
+            if t["_total"]>0:
+                c2.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s AND cerrado=TRUE",(fecha_hoy,uact))
+                cerr=bool(c2.fetchone())
+                est='<span class="estado-cerrada">Cerrada</span>' if cerr else '<span class="estado-abierta">Abierta</span>'
+                its=(_ci("Efectivo",t["Efectivo"],"#27AE60","min-width:70px;padding:5px 8px")+
+                     _ci("Cheque",t["Cheque"],"#2475B0","min-width:70px;padding:5px 8px")+
+                     _ci("Natasha",t["Transf. Natasha"],"#1A3A2A","min-width:70px;padding:5px 8px")+
+                     _ci("Maira",t["Transf. Maira"],"#7B68EE","min-width:70px;padding:5px 8px")+
+                     _ci("TOTAL",t["_total"],"#C8A96E","min-width:80px;padding:5px 8px;border:2px solid var(--accent)"))
+                cajas_live+=(f'<div class="caja-row" style="border-left:4px solid var(--info)">'
+                            f'<div class="caja-header"><div><span class="caja-user">{uact}</span>'
+                            f'<span class="caja-fecha"> · En tiempo real</span></div>{est}</div>'
+                            f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its}</div></div>')
+        conn2.close()
+        if cajas_live:
+            cajas_live=('<div class="fcard" style="margin-bottom:16px">'
+                       f'<h3>Cajas en tiempo real — hoy</h3>{cajas_live}</div>')
+
     body=(f'<h1 class="page-title">Caja Diaria</h1>'
           f'<p class="page-sub">Cobros del dia — {usuario} · {fecha_hoy}</p>'
           f'{flash}'
@@ -2764,10 +2804,17 @@ def caja():
           f'<div style="display:flex;gap:8px;flex-wrap:wrap">{items_hoy}</div>'
           f'{btn_cierre}'
           f'</div>'
+          f'{cajas_live if rol=="admin" else ""}'
           f'{tabla_cobros}'
           f'<div class="fcard"><h3>Historial de cierres</h3>'
           f'{cierre_html or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin cierres</p>"}'
           f'</div>'
+          +(f'<div class="fcard" style="margin-top:16px">'
+            f'<h3>Cobros por mes (cierres globales)</h3>'
+            f'<div style="position:relative;height:180px"><canvas id="ch-caja"></canvas></div>'
+            f'<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>'
+            f'<script>fetch("/api/cierres_por_mes").then(r=>r.json()).then(d=>{{new Chart(document.getElementById("ch-caja"),{{type:"bar",data:{{labels:d.labels,datasets:[{{label:"Cobrado",data:d.totales,backgroundColor:"#185FA5",borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{ticks:{{callback:v=>"$"+(Math.abs(v)>=1000000?Math.round(v/1000000)+"M":Math.abs(v)>=1000?Math.round(v/1000)+"k":v)}}}}}}}}}})}}).catch(()=>{{}});'
+            f'</script></div>' if rol=='admin' else '')
           +modal_editar_caja)
     return page("Caja",body,"Caja")
 
@@ -3170,17 +3217,11 @@ def generar_pdf(cliente_id, periodo, monto):
     except:
         monto_int=0
     # Link de transferencia BNA+ (alias directo)
-    # QR interoperable BCRA - funciona con TODAS las apps de home banking argentinas
-    # (BNA+, Mercado Pago, BBVA, Santander, Galicia, Macro, ICBC, Brubank, etc.)
-    # Formato estandar: https://transferencias.bancos.ar/pago?... (norma BCRA Com. A 7153)
-    qr_payload = (
-        "https://transferencias.bancos.ar/pago"
-        "?alias=ESTUDIO.CONTA.CARLON"
-        "&nombre=Alexis+Natasha+Carlon"
-        "&cbu=0110420630042013452529"
-        f"&monto={monto_int}"
-        f"&concepto=Honorarios+{periodo.replace('/','-')}"
-    )
+    # QR con CBU directo - formato que lee BNA+, Mercado Pago, Personal Pay
+    # Usar CBU en texto plano es el formato mas compatible
+    qr_payload = "0110420630042013452529"
+    # El QR del CBU lo leen todas las apps de transferencia argentinas
+    # El monto se muestra abajo del QR para que el cliente lo ingrese manualmente
     qr=qrcode.QRCode(version=2,error_correction=qrcode.constants.ERROR_CORRECT_M,
                      box_size=5,border=2)
     qr.add_data(qr_payload)
@@ -3662,7 +3703,7 @@ def novedades():
         '<a href="https://www.bcra.gob.ar" target="_blank" class="btn btn-b btn-sm">BCRA</a>'
         '</div></div>'
         '</div>'
-        '<div class="fcard" style="margin-top:14px"><h3>Indices del dia</h3>'
+        '<div class="fcard" style="margin-top:14px"><h3>CPCESE — Consejo Profesional</h3><div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px"><a href="https://cpcese.org.ar/matriculados/honorarios-minimos-eticos" target="_blank" class="btn btn-a btn-sm">Honorarios Minimos y Eticos CPCESE</a><a href="https://cpcese.org.ar/documentos/contadores%20afiche%2001-12-25.pdf" target="_blank" class="btn btn-o btn-sm">Ultima actualizacion honorarios (Dic 2025)</a><a href="https://autogestion.cpcese.org.ar/materiales" target="_blank" class="btn btn-o btn-sm">Cursos y materiales CPCESE</a></div></div><div class="fcard" style="margin-top:14px"><h3>Mercados e Inversiones</h3><div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px"><a href="https://www.rava.com/" target="_blank" class="btn btn-o btn-sm">RAVA — Bolsa y Mercado</a><a href="https://rofex.primary.ventures/fyo/futurosfinancieros" target="_blank" class="btn btn-o btn-sm">ROFEX — Futuros Financieros</a><a href="https://www.ambito.com/edicion-impresa/hacienda-carnes-y-la-factura-electronica-n3969539" target="_blank" class="btn btn-o btn-sm">Comprobante liquidacion hacienda</a></div></div><div class="fcard" style="margin-top:14px"><h3>Indices del dia</h3>'
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">'
         '<div class="scard" style="margin-bottom:0"><div class="slabel">Dolar Oficial</div><div class="sval" id="idx-oficial">---</div></div>'
         '<div class="scard b" style="margin-bottom:0"><div class="slabel">Dolar MEP</div><div class="sval" id="idx-mep">---</div></div>'
@@ -3675,22 +3716,22 @@ def novedades():
         '<div id="t-sal" class="tabpanel">'
         '<div class="warn-box" style="margin-bottom:14px">Las escalas se actualizan por paritaria. Verificar siempre en la fuente oficial antes de liquidar.</div>'
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
-        '<div class="fcard" style="margin-bottom:0"><h3>Transporte de Cargas (FADEEAC)</h3>'
+        '<div class="fcard" style="margin-bottom:0"><h3>Transporte de Cargas (FADEEAC/Camioneros)</h3><div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 40/89</div><div style="display:flex;flex-direction:column;gap:7px"><a href="https://www.camioneros-ba.org.ar/index.php/gremiales/salarios/escalas-salariales" target="_blank" class="btn btn-o btn-sm">Escalas Camioneros/Transporte</a><a href="https://federacion.impresiondeboletas.com.ar/login.aspx" target="_blank" class="btn btn-o btn-sm">Sindicato Camioneros Nacional</a><a href="http://camioneros.sirwiq.com/Login/Acceso" target="_blank" class="btn btn-o btn-sm">Camioneros Sgo. del Estero</a>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 40/89</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://www.fadeeac.org.ar/escala-salarial" target="_blank" class="btn btn-o btn-sm">Escala vigente FADEEAC</a>'
+        '<a href="https://www.camioneros-ba.org.ar/index.php/gremiales/salarios/escalas-salariales" target="_blank" class="btn btn-o btn-sm">Escala vigente FADEEAC</a>'
         '<a href="https://www.argentina.gob.ar/trabajo/convenios" target="_blank" class="btn btn-o btn-sm">Convenios MTSS</a>'
         '</div></div>'
         '<div class="fcard" style="margin-bottom:0"><h3>Comercio — Emp. de Comercio (FAECYS)</h3>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 130/75</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://www.faecys.org.ar" target="_blank" class="btn btn-o btn-sm">Escala FAECYS</a>'
+        '<a href="https://jorgevega.com.ar/laboral/71-empleados-comercio-escala-salarial-2016-2017.html" target="_blank" class="btn btn-o btn-sm">Escala FAECYS</a>'
         '<a href="https://www.argentina.gob.ar/trabajo/escalasSalariales" target="_blank" class="btn btn-o btn-sm">Portal escalas MTSS</a>'
         '</div></div>'
         '<div class="fcard" style="margin-bottom:0"><h3>Trabajadores Agropecuarios (UATRE)</h3>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 1/75 — Personal rural</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://www.uatre.org.ar" target="_blank" class="btn btn-o btn-sm">UATRE oficial</a>'
+        '<a href="https://www.ignacioonline.com.ar/paritaria-agrarios-escalas-salariales-marzo-abril-y-junio-2026-uatre/" target="_blank" class="btn btn-o btn-sm">UATRE oficial</a>'
         '<a href="https://www.renatea.gob.ar" target="_blank" class="btn btn-o btn-sm">RENATEA</a>'
         '</div></div>'
         '<div class="fcard" style="margin-bottom:0"><h3>SMVyM — Salario Minimo</h3>'
@@ -3733,7 +3774,7 @@ def novedades():
         '<p style="font-size:.83rem;color:var(--muted);margin-bottom:14px;line-height:1.6">'
         'Tutoriales de liquidacion de sueldos, manejo del sistema, novedades impositivas '
         'y actualizaciones para estudios contables.</p>'
-        '<a href="https://www.youtube.com/@holistor" target="_blank" '
+        '<a href="https://www.youtube.com/@HolistorSA/videos" target="_blank" '
         'class="btn btn-sm" style="background:#FF0000;color:#fff;width:100%;justify-content:center;display:flex">'
         'Ver canal completo en YouTube</a>'
         '</div>'
@@ -3750,6 +3791,19 @@ def novedades():
     body = bna_bar + tabs + t_imp + t_sal + t_srt + t_yt + dolar_script
     return page("Novedades", body, "Novedades")
 
+
+
+@app.route("/api/cierres_por_mes")
+@admin_req
+def api_cierres_por_mes():
+    conn=conectar();c=conn.cursor()
+    c.execute("""SELECT SUBSTRING(fecha,7,4)||'/'||SUBSTRING(fecha,4,2) as mes_anio,
+                        SUM(total_general)
+                 FROM cierres_caja WHERE cerrado=TRUE
+                 GROUP BY mes_anio ORDER BY SUBSTRING(fecha,7,4),SUBSTRING(fecha,4,2) DESC LIMIT 12""")
+    rows=list(reversed(c.fetchall())); conn.close()
+    from flask import jsonify
+    return jsonify({"labels":[r[0] for r in rows],"totales":[float(r[1] or 0) for r in rows]})
 
 if __name__=="__main__":
     app.run(debug=True)
