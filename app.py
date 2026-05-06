@@ -387,9 +387,9 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/seguridad","🔒 Seguridad"),("/configuracion","⚙️ Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda")]
+    links_sec=[("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -859,6 +859,58 @@ def panel():
     <h1 class="page-title">Panel General</h1>
     <p class="page-sub">Hola, <b>{session.get("display","")}</b> - {now_ar()}</p>
     {alertas}
+    <div id="dolar-bar" style="background:var(--card);border-radius:var(--r);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Dólar BNA hoy</span><div id="dolar-val" style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary)">cargando...</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Compra</span><div id="dolar-cmp" style="font-size:.95rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Venta</span><div id="dolar-vta" style="font-size:.95rem;font-weight:600;color:var(--danger)">---</div></div></div><div style="text-align:right"><div id="reloj" style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)"></div><div id="fecha-hoy" style="font-size:.74rem;color:var(--muted)"></div></div></div>
+    <script>
+    // Reloj en tiempo real
+    function tick(){{
+      var n=new Date();
+      var d=n.getDate().toString().padStart(2,"0");
+      var m=(n.getMonth()+1).toString().padStart(2,"0");
+      var y=n.getFullYear();
+      var H=n.getHours().toString().padStart(2,"0");
+      var M=n.getMinutes().toString().padStart(2,"0");
+      var S=n.getSeconds().toString().padStart(2,"0");
+      var dias=["Domingo","Lunes","Martes","Miercoles","Jueves","Viernes","Sabado"];
+      document.getElementById("reloj").textContent=H+":"+M+":"+S;
+      document.getElementById("fecha-hoy").textContent=dias[n.getDay()]+" "+d+"/"+m+"/"+y;
+    }}
+    tick(); setInterval(tick,1000);
+    // Cotizacion dolar BNA via DolarApi.ar
+    fetch("https://dolarapi.com/v1/dolares/oficial")
+      .then(r=>r.json())
+      .then(d=>{{
+        document.getElementById("dolar-val").textContent="Oficial BNA";
+        document.getElementById("dolar-cmp").textContent="$"+d.compra.toLocaleString("es-AR",{{minimumFractionDigits:2}});
+        document.getElementById("dolar-vta").textContent="$"+d.venta.toLocaleString("es-AR",{{minimumFractionDigits:2}});
+      }})
+      .catch(()=>{{document.getElementById("dolar-val").textContent="Sin conexion";}});
+    </script>
+    <div id="dolar-bar" style="background:var(--card);border-radius:var(--r);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Dólar BNA hoy</span><div id="dolar-val" style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary)">cargando...</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Compra</span><div id="dolar-cmp" style="font-size:.95rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Venta</span><div id="dolar-vta" style="font-size:.95rem;font-weight:600;color:var(--danger)">---</div></div></div><div style="text-align:right"><div id="reloj" style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)"></div><div id="fecha-hoy" style="font-size:.74rem;color:var(--muted)"></div></div></div>
+    <script>
+    // Reloj en tiempo real
+    function tick(){{
+      var n=new Date();
+      var d=n.getDate().toString().padStart(2,"0");
+      var m=(n.getMonth()+1).toString().padStart(2,"0");
+      var y=n.getFullYear();
+      var H=n.getHours().toString().padStart(2,"0");
+      var M=n.getMinutes().toString().padStart(2,"0");
+      var S=n.getSeconds().toString().padStart(2,"0");
+      var dias=["Domingo","Lunes","Martes","Miercoles","Jueves","Viernes","Sabado"];
+      document.getElementById("reloj").textContent=H+":"+M+":"+S;
+      document.getElementById("fecha-hoy").textContent=dias[n.getDay()]+" "+d+"/"+m+"/"+y;
+    }}
+    tick(); setInterval(tick,1000);
+    // Cotizacion dolar BNA via DolarApi.ar
+    fetch("https://dolarapi.com/v1/dolares/oficial")
+      .then(r=>r.json())
+      .then(d=>{{
+        document.getElementById("dolar-val").textContent="Oficial BNA";
+        document.getElementById("dolar-cmp").textContent="$"+d.compra.toLocaleString("es-AR",{{minimumFractionDigits:2}});
+        document.getElementById("dolar-vta").textContent="$"+d.venta.toLocaleString("es-AR",{{minimumFractionDigits:2}});
+      }})
+      .catch(()=>{{document.getElementById("dolar-val").textContent="Sin conexion";}});
+    </script>
     <div class="stats">
       <div class="scard"><div class="sicon">&#x1F4B0;</div><div class="slabel">Total Facturado</div><div class="sval">{fmt(td)}</div></div>
       <div class="scard g"><div class="sicon">&#x2705;</div><div class="slabel">Total Cobrado</div><div class="sval">{fmt(th)}</div></div>
@@ -3552,6 +3604,177 @@ def app_movil():
             '</div>'
             +flash_html+content_tab+
             '</div>'+tab_bar+'</body></html>')
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  NOVEDADES
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/novedades")
+@login_req  
+def novedades():
+    dolar_script = (
+        "<script>"
+        "fetch('https://dolarapi.com/v1/dolares/oficial').then(r=>r.json()).then(d=>{"
+        "document.getElementById('nc').textContent='$'+d.compra.toLocaleString('es-AR',{minimumFractionDigits:2});"
+        "document.getElementById('nv').textContent='$'+d.venta.toLocaleString('es-AR',{minimumFractionDigits:2});"
+        "document.getElementById('idx-oficial').textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "}).catch(()=>{});"
+        "fetch('https://dolarapi.com/v1/dolares/bolsa').then(r=>r.json()).then(d=>{"
+        "document.getElementById('idx-mep').textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "}).catch(()=>{});"
+        "fetch('https://dolarapi.com/v1/dolares/blue').then(r=>r.json()).then(d=>{"
+        "document.getElementById('idx-blue').textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "}).catch(()=>{});"
+        "fetch('https://apis.datos.gob.ar/series/api/series/?ids=143.3_SALM_DICI_0_36_6&limit=1&sort=desc&format=json')"
+        ".then(r=>r.json()).then(d=>{"
+        "if(d.data&&d.data.length){var v=parseFloat(d.data[0][1]);"
+        "document.getElementById('smvym-val').textContent='$'+v.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "document.getElementById('idx-smvym').textContent='$'+v.toLocaleString('es-AR',{maximumFractionDigits:0});}"
+        "else{document.getElementById('smvym-val').textContent='Ver en MTSS';}"
+        "}).catch(()=>{document.getElementById('smvym-val').textContent='Ver en MTSS';});"
+        "function tickN(){var n=new Date(),pad=x=>x.toString().padStart(2,'0');"
+        "var dias=['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];"
+        "document.getElementById('nreloj').textContent=pad(n.getHours())+':'+pad(n.getMinutes())+':'+pad(n.getSeconds());"
+        "document.getElementById('nfecha').textContent=dias[n.getDay()]+' '+pad(n.getDate())+'/'+(pad(n.getMonth()+1))+'/'+n.getFullYear();}"
+        "tickN();setInterval(tickN,1000);"
+        "function showTab(id,btn){document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));"
+        "document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));"
+        "document.getElementById(id).classList.add('on');btn.classList.add('on');}"
+        "</script>"
+        "<style>@media(max-width:700px){.twocol{grid-template-columns:1fr!important}}</style>"
+    )
+    bna_bar = (
+        '<div style="background:var(--card);border-radius:var(--r);padding:14px 20px;'
+        'box-shadow:var(--shadow);margin-bottom:20px;display:flex;align-items:center;'
+        'justify-content:space-between;flex-wrap:wrap;gap:12px">'
+        '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'
+        '<div><div style="font-size:.66rem;font-weight:700;color:var(--muted);'
+        'text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Dolar BNA Oficial</div>'
+        '<div style="display:flex;gap:12px;align-items:baseline">'
+        '<div><span style="font-size:.68rem;color:var(--muted)">Compra</span> '
+        '<span id="nc" style="font-weight:700;font-size:1.05rem;color:var(--success)">---</span></div>'
+        '<div><span style="font-size:.68rem;color:var(--muted)">Venta</span> '
+        '<span id="nv" style="font-weight:700;font-size:1.05rem;color:var(--danger)">---</span></div>'
+        '</div></div></div>'
+        '<div style="text-align:right">'
+        '<div id="nreloj" style="font-size:1.2rem;color:var(--primary)"></div>'
+        '<div id="nfecha" style="font-size:.74rem;color:var(--muted)"></div>'
+        '</div></div>'
+    )
+    tabs = (
+        '<div class="tabs">'
+        '<button class="tab on" onclick="showTab(\'t-imp\',this)">Impositivo</button>'
+        '<button class="tab" onclick="showTab(\'t-sal\',this)">Escalas Salariales</button>'
+        '<button class="tab" onclick="showTab(\'t-srt\',this)">SRT / ART</button>'
+        '<button class="tab" onclick="showTab(\'t-yt\',this)">Holistor</button>'
+        '</div>'
+    )
+    t_imp = (
+        '<div id="t-imp" class="tabpanel on">'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
+        '<div class="fcard" style="margin-bottom:0"><h3>ARCA / AFIP Novedades</h3>'
+        '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">'
+        '<a href="https://www.arca.gob.ar/noticias/" target="_blank" class="btn btn-o btn-sm">Noticias ARCA</a>'
+        '<a href="https://www.arca.gob.ar/vencimientos/" target="_blank" class="btn btn-arca btn-sm">Calendario Vencimientos ARCA</a>'
+        '<a href="https://www.argentina.gob.ar/trabajo/bo" target="_blank" class="btn btn-o btn-sm">Boletin Oficial</a>'
+        '</div></div>'
+        '<div class="fcard" style="margin-bottom:0"><h3>Links impositivos utiles</h3>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-arca btn-sm">ARCA Login</a>'
+        '<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do" target="_blank" class="btn btn-o btn-sm">Constancia Inscripcion</a>'
+        '<a href="https://www.arca.gob.ar/monotributo/categorias.asp" target="_blank" class="btn btn-o btn-sm">Categorias Monotributo</a>'
+        '<a href="http://dgronline.dgrsantiago.gob.ar" target="_blank" class="btn btn-o btn-sm">Rentas Santiago del Estero</a>'
+        '<a href="https://www.bcra.gob.ar" target="_blank" class="btn btn-b btn-sm">BCRA</a>'
+        '</div></div>'
+        '</div>'
+        '<div class="fcard" style="margin-top:14px"><h3>Indices del dia</h3>'
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">'
+        '<div class="scard" style="margin-bottom:0"><div class="slabel">Dolar Oficial</div><div class="sval" id="idx-oficial">---</div></div>'
+        '<div class="scard b" style="margin-bottom:0"><div class="slabel">Dolar MEP</div><div class="sval" id="idx-mep">---</div></div>'
+        '<div class="scard o" style="margin-bottom:0"><div class="slabel">Dolar Blue</div><div class="sval" id="idx-blue">---</div></div>'
+        '<div class="scard g" style="margin-bottom:0"><div class="slabel">SMVYM</div><div class="sval" id="idx-smvym">---</div></div>'
+        '</div></div>'
+        '</div>'
+    )
+    t_sal = (
+        '<div id="t-sal" class="tabpanel">'
+        '<div class="warn-box" style="margin-bottom:14px">Las escalas se actualizan por paritaria. Verificar siempre en la fuente oficial antes de liquidar.</div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
+        '<div class="fcard" style="margin-bottom:0"><h3>Transporte de Cargas (FADEEAC)</h3>'
+        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 40/89</div>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.fadeeac.org.ar/escala-salarial" target="_blank" class="btn btn-o btn-sm">Escala vigente FADEEAC</a>'
+        '<a href="https://www.argentina.gob.ar/trabajo/convenios" target="_blank" class="btn btn-o btn-sm">Convenios MTSS</a>'
+        '</div></div>'
+        '<div class="fcard" style="margin-bottom:0"><h3>Comercio — Emp. de Comercio (FAECYS)</h3>'
+        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 130/75</div>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.faecys.org.ar" target="_blank" class="btn btn-o btn-sm">Escala FAECYS</a>'
+        '<a href="https://www.argentina.gob.ar/trabajo/escalasSalariales" target="_blank" class="btn btn-o btn-sm">Portal escalas MTSS</a>'
+        '</div></div>'
+        '<div class="fcard" style="margin-bottom:0"><h3>Trabajadores Agropecuarios (UATRE)</h3>'
+        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 1/75 — Personal rural</div>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.uatre.org.ar" target="_blank" class="btn btn-o btn-sm">UATRE oficial</a>'
+        '<a href="https://www.renatea.gob.ar" target="_blank" class="btn btn-o btn-sm">RENATEA</a>'
+        '</div></div>'
+        '<div class="fcard" style="margin-bottom:0"><h3>SMVyM — Salario Minimo</h3>'
+        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Fijado por el CNEPSMVYM</div>'
+        '<div id="smvym-box" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:10px">'
+        '<div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Valor actual</div>'
+        '<div id="smvym-val" style="font-size:1.3rem;color:var(--success)">cargando...</div>'
+        '</div>'
+        '<a href="https://www.argentina.gob.ar/trabajo/smvm" target="_blank" class="btn btn-g btn-sm">Ver SMVYM oficial</a>'
+        '</div>'
+        '</div></div>'
+    )
+    t_srt = (
+        '<div id="t-srt" class="tabpanel">'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
+        '<div class="fcard" style="margin-bottom:0"><h3>SRT — Monto fijo y actualizaciones</h3>'
+        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:12px">Actualizacion trimestral. Verificar monto vigente antes de liquidar.</div>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.srt.gob.ar" target="_blank" class="btn btn-o btn-sm">SRT Oficial</a>'
+        '<a href="https://www.srt.gob.ar/index.shtml/montosfijos" target="_blank" class="btn btn-o btn-sm">Montos fijos vigentes</a>'
+        '<a href="https://servicios.srt.gob.ar/srt/emision/index.xhtml" target="_blank" class="btn btn-o btn-sm">Sistema SRT Emision</a>'
+        '<a href="https://www.srt.gob.ar/index.shtml/siniestros" target="_blank" class="btn btn-o btn-sm">Denuncia Siniestros</a>'
+        '</div></div>'
+        '<div class="fcard" style="margin-bottom:0"><h3>Higiene y Seguridad Laboral</h3>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.argentina.gob.ar/trabajo/seguridadysalud" target="_blank" class="btn btn-b btn-sm">Seguridad e Higiene MTSS</a>'
+        '<a href="https://www.srt.gob.ar/estadisticas/" target="_blank" class="btn btn-o btn-sm">Estadisticas SRT</a>'
+        '<a href="https://www.argentina.gob.ar/trabajo" target="_blank" class="btn btn-o btn-sm">Ministerio de Trabajo</a>'
+        '</div></div>'
+        '</div></div>'
+    )
+    t_yt = (
+        '<div id="t-yt" class="tabpanel">'
+        '<div class="fcard">'
+        '<h3>Canal Holistor — Tutoriales y novedades</h3>'
+        '<p style="color:var(--muted);font-size:.83rem;margin-bottom:16px">Videos de capacitacion, tutoriales del programa Holistor y novedades impositivas.</p>'
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:16px">'
+        '<div style="background:var(--bg);border-radius:10px;padding:16px">'
+        '<div style="font-weight:700;color:var(--primary);margin-bottom:8px;font-size:1rem">Canal Holistor</div>'
+        '<p style="font-size:.83rem;color:var(--muted);margin-bottom:14px;line-height:1.6">'
+        'Tutoriales de liquidacion de sueldos, manejo del sistema, novedades impositivas '
+        'y actualizaciones para estudios contables.</p>'
+        '<a href="https://www.youtube.com/@holistor" target="_blank" '
+        'class="btn btn-sm" style="background:#FF0000;color:#fff;width:100%;justify-content:center;display:flex">'
+        'Ver canal completo en YouTube</a>'
+        '</div>'
+        '<div style="background:var(--bg);border-radius:10px;padding:16px">'
+        '<div style="font-weight:700;color:var(--primary);margin-bottom:8px">Como buscar videos</div>'
+        '<div class="info-box">Busca en YouTube: <b>Holistor liquidacion</b>, <b>Holistor sueldos</b>, <b>Holistor AFIP</b></div>'
+        '<div style="margin-top:10px;display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.youtube.com/results?search_query=holistor+liquidacion+sueldos" target="_blank" class="btn btn-o btn-sm">Buscar: liquidacion sueldos</a>'
+        '<a href="https://www.youtube.com/results?search_query=holistor+novedades+impositivas" target="_blank" class="btn btn-o btn-sm">Buscar: novedades impositivas</a>'
+        '<a href="https://www.youtube.com/results?search_query=holistor+tutorial" target="_blank" class="btn btn-o btn-sm">Buscar: tutoriales</a>'
+        '</div></div>'
+        '</div></div></div>'
+    )
+    body = bna_bar + tabs + t_imp + t_sal + t_srt + t_yt + dolar_script
+    return page("Novedades", body, "Novedades")
+
 
 if __name__=="__main__":
     app.run(debug=True)
