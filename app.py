@@ -17,8 +17,15 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 DB_URL = os.getenv("DB_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-WHATSAPP_NUMERO = os.getenv("WHATSAPP_NUMERO", "3855164943")
-CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY", "")
+# Numero personal del admin - recibe alertas de seguridad
+WHATSAPP_ADMIN    = os.getenv("WHATSAPP_ADMIN", "3855164943")
+# Numero del estudio - usado para enviar mensajes a clientes
+WHATSAPP_ESTUDIO  = os.getenv("WHATSAPP_ESTUDIO", "3843674464")
+# Mantener por compatibilidad - apunta al admin
+WHATSAPP_NUMERO   = WHATSAPP_ADMIN
+# API keys separadas para cada numero
+CALLMEBOT_APIKEY         = os.getenv("CALLMEBOT_APIKEY", "")          # admin (3855164943)
+CALLMEBOT_APIKEY_ESTUDIO = os.getenv("CALLMEBOT_APIKEY_ESTUDIO", "2530568")  # estudio (3843674464)
 ENCRYPT_KEY = os.getenv("ENCRYPT_KEY", "").encode() if os.getenv("ENCRYPT_KEY") else None
 
 # ── Encriptación de datos sensibles ──────────────────────────────────────────
@@ -41,14 +48,30 @@ def dec(val):
 
 # ── Envío de alertas WhatsApp via CallMeBot ───────────────────────────────────
 def enviar_whatsapp(mensaje):
+    """Alerta de seguridad al celular personal del admin"""
     try:
-        if not CALLMEBOT_APIKEY: return
-        num = WHATSAPP_NUMERO.replace("+","").replace(" ","")
+        apikey = CALLMEBOT_APIKEY
+        if not apikey: return
+        num = WHATSAPP_ADMIN.replace("+","").replace(" ","")
         msg_enc = urllib.parse.quote(mensaje)
-        url = f"https://api.callmebot.com/whatsapp.php?phone=54{num}&text={msg_enc}&apikey={CALLMEBOT_APIKEY}"
+        url = f"https://api.callmebot.com/whatsapp.php?phone=54{num}&text={msg_enc}&apikey={apikey}"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         urllib.request.urlopen(req, timeout=5)
     except: pass
+
+def enviar_whatsapp_estudio(numero_cliente, mensaje):
+    """Envia WA a un cliente desde el numero del estudio"""
+    try:
+        apikey = CALLMEBOT_APIKEY_ESTUDIO
+        if not apikey: return False
+        num = str(numero_cliente).replace("+","").replace(" ","").replace("-","")
+        if not num.startswith("54"): num = "54" + num
+        msg_enc = urllib.parse.quote(mensaje)
+        url = f"https://api.callmebot.com/whatsapp.php?phone={num}&text={msg_enc}&apikey={apikey}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        urllib.request.urlopen(req, timeout=6)
+        return True
+    except: return False
 
 # ── Rate limiting & bloqueo de login ─────────────────────────────────────────
 LOGIN_INTENTOS = {}   # {ip: {"count": n, "ts": timestamp, "blocked_until": ts}}
@@ -919,7 +942,7 @@ def seguridad():
                 registrar_evento_seguridad("BLOQUEO_MANUAL",f"Admin bloqueó {ip_m}: {motivo}",ip_m)
                 flash = f'<div class="flash fok">IP {ip_m} bloqueada manualmente</div>'
         elif accion == "enviar_test_wa":
-            enviar_whatsapp(f"✅ TEST - Sistema Estudio Carlon funcionando\n📅 {now_ar()}")
+            enviar_whatsapp(f"✅ TEST SEGURIDAD - Sistema Estudio Carlon\nEste mensaje llega a tu celular personal (admin).\n📅 {now_ar()}")
             flash = '<div class="flash fok">Mensaje de prueba enviado por WhatsApp</div>'
 
     # Cargar datos de seguridad
@@ -1267,7 +1290,8 @@ def configuracion():
             </div>
           </div>
           <div class="info-box" style="margin-bottom:14px">
-            📱 Alertas WhatsApp al número <b>{WHATSAPP_NUMERO}</b> via CallMeBot.<br>
+            📱 Alertas de seguridad → tu celular personal (<b>{WHATSAPP_ADMIN}</b>).<br>
+                    📱 Mensajes a clientes → celular del estudio (<b>{WHATSAPP_ESTUDIO}</b>).<br>
             🌎 Bloqueo por país usando ip-api.com.<br>
             🔐 Datos sensibles (CUIT, teléfono, email) encriptados con Fernet AES-128.<br>
             🤖 Rate limiting activo: anti-bots automático.
@@ -1666,12 +1690,10 @@ def wa_masivo():
                     num=f"54{tel_d}" if not tel_d.startswith("54") else tel_d
                     nombre_c=nombre.split()[0] if nombre else "cliente"
                     msg_final=f"Estimado/a {nombre_c},\n\n"+mensaje
-                    try:
-                        url=f"https://api.callmebot.com/whatsapp.php?phone={num}&text={urllib.parse.quote(msg_final)}&apikey={CALLMEBOT_APIKEY}"
-                        req2=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
-                        urllib.request.urlopen(req2,timeout=6)
-                        enviados+=1; time.sleep(0.6)
-                    except: errores.append(nombre)
+                    ok=enviar_whatsapp_estudio(tel_d, msg_final)
+                    if ok: enviados+=1
+                    else: errores.append(nombre)
+                    time.sleep(0.6)
                 registrar_auditoria("WA_MASIVO_GRAL",f"{enviados} enviados, {len(errores)} errores")
                 err_txt=(f" · Errores: {', '.join(errores[:4])}" if errores else "")
                 flash=f'<div class="flash fok">✅ {enviados} mensajes enviados{err_txt}</div>'
@@ -1830,12 +1852,10 @@ def wa_facturas_preview():
                         msg=MSG_FACTURAS.replace("{nombre}",nombre_c).replace("{mes}",mes_nombre)
                     else:
                         msg=MSG_COBRO.replace("{nombre}",nombre_c).replace("{saldo}",fmt(saldo)).replace("{periodo}",periodo_actual)
-                    try:
-                        url=f"https://api.callmebot.com/whatsapp.php?phone={num}&text={urllib.parse.quote(msg)}&apikey={CALLMEBOT_APIKEY}"
-                        req2=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
-                        urllib.request.urlopen(req2,timeout=6)
-                        enviados+=1; time.sleep(0.6)
-                    except: errores.append(nombre)
+                    ok=enviar_whatsapp_estudio(tel_d, msg)
+                    if ok: enviados+=1
+                    else: errores.append(nombre)
+                    time.sleep(0.6)
                 registrar_auditoria("WA_MASIVO",f"Tipo:{tipo} {mes_nombre}: {enviados} enviados")
                 err_txt=(f" · Errores: {', '.join(errores[:4])}" if errores else "")
                 flash=f'<div class="flash fok">✅ {enviados} mensajes enviados{err_txt}</div>'
@@ -1945,6 +1965,46 @@ def borrar_pago(cliente_id, periodo):
     registrar_auditoria("BORRAR_PAGO",f"Eliminado pago de {fmt(total_pago)} periodo {periodo}",cliente_id,nombre)
     return redirect(f"/cuenta/{cliente_id}")
 
+@app.route("/editar_pago", methods=["POST"])
+@login_req
+def editar_pago():
+    pago_id    = request.form.get("pago_id","").strip()
+    cliente_id = request.form.get("cliente_id","").strip()
+    nuevo_per  = request.form.get("nuevo_periodo","").strip()
+    nuevo_monto= float(request.form.get("nuevo_monto",0) or 0)
+    nuevo_medio= request.form.get("nuevo_medio","Efectivo")
+    nuevo_obs  = request.form.get("nuevo_obs","").strip()
+    if not pago_id or not cliente_id:
+        return redirect(f"/cuenta/{cliente_id}")
+    conn=conectar();c=conn.cursor()
+    # Obtener pago original
+    c.execute("SELECT periodo,monto,cliente_id FROM pagos WHERE id=%s",(pago_id,))
+    row=c.fetchone()
+    if not row:
+        conn.close(); return redirect(f"/cuenta/{cliente_id}")
+    per_orig,monto_orig,cid=row
+    # Revertir haber del periodo original
+    c.execute("UPDATE cuentas SET haber=GREATEST(COALESCE(haber,0)-%s,0) WHERE cliente_id=%s AND periodo=%s",
+              (monto_orig,cid,per_orig))
+    # Aplicar nuevo haber al nuevo periodo
+    c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cid,nuevo_per))
+    if c.fetchone():
+        c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",
+                  (nuevo_monto,cid,nuevo_per))
+    else:
+        c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",
+                  (cid,nuevo_per,nuevo_monto))
+    # Actualizar el registro del pago
+    c.execute("""UPDATE pagos SET periodo=%s,monto=%s,medio=%s,observaciones=%s
+                 WHERE id=%s""",
+              (nuevo_per,nuevo_monto,nuevo_medio,nuevo_obs,pago_id))
+    conn.commit(); conn.close()
+    registrar_auditoria("EDITAR_PAGO",
+        f"Pago #{pago_id}: {per_orig}→{nuevo_per} | {fmt(monto_orig)}→{fmt(nuevo_monto)} | {nuevo_medio}",
+        int(cliente_id))
+    return redirect(f"/cuenta/{cliente_id}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CUENTA / PAGOS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1974,7 +2034,7 @@ def cuenta(id):
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
     c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC",(id,))
     datos=c.fetchall()
-    c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
+    c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
     historial=c.fetchall();conn.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
@@ -2034,11 +2094,18 @@ def cuenta(id):
         fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
                 if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>')
         emitido=h[7] or h[1]
-        hist_rows+=('<div class="logrow"><div class="log-dot"></div>'
+        pid=h[8]
+        btn_edit=('<button onclick="editarPago('+str(pid)+',\''+h[2]+'\',\''+h[4]+'\',\''+str(h[3])+'\',\''+str(h[6] or "")+'\')" '
+                  +'class="btn btn-xs btn-o" style="margin-left:6px" title="Editar">✏️</button>')
+        hist_rows+=('<div class="logrow" style="justify-content:space-between;align-items:center">'
+                    +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
+                    +'<div class="log-dot"></div>'
                     +'<span class="log-time">'+h[0]+'</span>'
                     +'<span class="log-user">'+emitido+'</span>'
                     +'<span class="log-msg"><b>'+h[2]+'</b> · '+fmt(h[3])+' · '+h[4]
-                    +((" · "+h[6]) if h[6] else "")+' '+fact_b+'</span></div>')
+                    +((" · "+h[6]) if h[6] else "")+' '+fact_b+'</span>'
+                    +'</div>'
+                    +btn_edit+'</div>')
     medios_opts="".join(f'<option value="{m}">{m}</option>' for m in MEDIOS_PAGO)
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">← Clientes</a>
@@ -2060,7 +2127,7 @@ def cuenta(id):
               <div class="fg"><label>Monto $</label><input name="pago" type="number" step="0.01" required></div>
               <div class="fg"><label>Medio de pago</label><select name="medio">{medios_opts}</select></div>
               <div class="fg"><label>Observaciones</label><input name="observaciones" placeholder="Opcional"></div>
-              <div class="fg" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="facturado" value="1" style="width:auto"> <label style="text-transform:none;font-size:.84rem">Emitir factura ARCA</label></div>
+              <div class="fg" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="facturado" value="1" id="chk-fact" style="width:auto"> <label style="text-transform:none;font-size:.84rem;cursor:pointer" for="chk-fact">Emitir factura ARCA</label></div>
             </div>
             <button class="btn btn-g">Registrar Pago</button>
           </form>
@@ -2077,6 +2144,10 @@ def cuenta(id):
           <input name="pago" id="mp-monto" type="number" step="0.01"></div>
         <div class="fg" style="margin-bottom:14px"><label>Medio de pago</label>
           <select name="medio">{medios_opts}</select></div>
+        <div class="fg" style="flex-direction:row;align-items:center;gap:8px;margin-bottom:12px">
+          <input type="checkbox" name="facturado" value="1" id="chk-fact-m" style="width:auto">
+          <label style="font-size:.84rem;cursor:pointer" for="chk-fact-m">Emitir factura ARCA</label>
+        </div>
         <div class="mact">
           <button type="button" class="btn btn-o" onclick="closeM('mp')">Cancelar</button>
           <button type="submit" class="btn btn-g">Registrar</button>
@@ -2105,6 +2176,40 @@ def cuenta(id):
       </div>
     </div></div>
 
+    <!-- Modal editar pago -->
+    <div class="mo" id="mep"><div class="modal">
+      <h3>✏️ Editar Pago</h3>
+      <p class="msub" id="mep-sub"></p>
+      <form method="post" action="/editar_pago">
+        <input type="hidden" name="pago_id" id="mep-id">
+        <input type="hidden" name="cliente_id" value="{id}">
+        <div class="fg" style="margin-bottom:11px">
+          <label>Periodo (MM/AAAA)</label>
+          <input name="nuevo_periodo" id="mep-per" placeholder="05/2026" required
+            style="font-size:.9rem">
+        </div>
+        <div class="fg" style="margin-bottom:11px">
+          <label>Monto $</label>
+          <input name="nuevo_monto" id="mep-monto" type="number" step="0.01" required>
+        </div>
+        <div class="fg" style="margin-bottom:11px">
+          <label>Medio de pago</label>
+          <select name="nuevo_medio" id="mep-medio">{medios_opts}</select>
+        </div>
+        <div class="fg" style="margin-bottom:14px">
+          <label>Observaciones</label>
+          <input name="nuevo_obs" id="mep-obs" placeholder="Opcional">
+        </div>
+        <div class="info-box" style="margin-bottom:12px;font-size:.78rem">
+          Solo se edita el registro del pago. El saldo se recalcula automáticamente.
+        </div>
+        <div class="mact">
+          <button type="button" class="btn btn-o" onclick="closeM('mep')">Cancelar</button>
+          <button type="submit" class="btn btn-a">Guardar cambios</button>
+        </div>
+      </form>
+    </div></div>
+
     <script>
     var _waTel = "{telefono}";
     var _waNom = "{nombre.replace(chr(34),"").replace(chr(39),"")}";
@@ -2115,6 +2220,33 @@ def cuenta(id):
       document.getElementById('mp-per').value=p;
       document.getElementById('mp-monto').value=Math.round(s);
       document.getElementById('mp').classList.add('on');
+      setTimeout(function(){{document.getElementById('mp-monto').select()}},120);
+    }}
+    document.addEventListener('click',function(e){{
+      var b=e.target.closest('.pagarBtn');
+      if(b){{abrirPago(b.dataset.per,parseInt(b.dataset.sal));}}
+      var w=e.target.closest('.waBtn');
+      if(w){{abrirWA(w.dataset.per,parseInt(w.dataset.sal));}}
+    }});
+    // Redirigir a ARCA al tildar Facturado
+    var fChk=document.getElementById('chk-fact');
+    if(fChk){{
+      fChk.addEventListener('change',function(){{
+        if(this.checked){{
+          if(confirm('Se va a abrir ARCA para emitir la factura. ¿Continuar?'))
+            window.open('https://www.arca.gob.ar/landing/default.asp','_blank');
+        }}
+      }});
+    }}
+    // También el checkbox del modal rapido
+    var fChkM=document.getElementById('chk-fact-m');
+    if(fChkM){{
+      fChkM.addEventListener('change',function(){{
+        if(this.checked){{
+          if(confirm('Se va a abrir ARCA para emitir la factura. ¿Continuar?'))
+            window.open('https://www.arca.gob.ar/landing/default.asp','_blank');
+        }}
+      }});
     }}
 
     function abrirWA(periodo, saldo){{
@@ -2140,6 +2272,18 @@ def cuenta(id):
       var num="54"+_waTel.replace(/[^0-9]/g,'');
       window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
       closeM('mwa');
+    }}
+
+    function editarPago(pid,periodo,medio,monto,obs){{
+      document.getElementById('mep-id').value=pid;
+      document.getElementById('mep-sub').textContent='Pago #'+pid+' · '+periodo;
+      document.getElementById('mep-per').value=periodo;
+      document.getElementById('mep-monto').value=monto;
+      var sel=document.getElementById('mep-medio');
+      for(var i=0;i<sel.options.length;i++){{if(sel.options[i].value===medio){{sel.selectedIndex=i;break;}}}}
+      document.getElementById('mep-obs').value=obs||'';
+      document.getElementById('mep').classList.add('on');
+      setTimeout(function(){{document.getElementById('mep-per').focus()}},100);
     }}
 
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
