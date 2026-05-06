@@ -1517,7 +1517,9 @@ def clientes():
           </div></td>
         </tr>'''
 
-    btn_wa_masivo='<a href="/wa_facturas_preview" class="btn btn-wa btn-sm">📱 WA Clientes</a>'
+    btn_wa_masivo=('<a href="/wa_masivo" class="btn btn-wa btn-sm">📱 WA Recordatorio General</a>'
+                  +' <a href="/wa_facturas_preview?tipo=facturas" class="btn btn-wa btn-sm">📂 WA Facturas</a>'
+                  +' <a href="/wa_facturas_preview?tipo=cobro" class="btn btn-wa btn-sm">💰 WA Cobros</a>')
     cond_opts="".join(f'<option value="{cf}">{cf}</option>' for cf in CONDICIONES_FISCALES)
     modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM(&apos;mb&apos;)">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
     n_ri=sum(1 for d in data_raw if d[8])
@@ -1622,6 +1624,131 @@ def editar_cliente(id):
       <div style="display:flex;gap:8px"><button class="btn btn-p">Guardar Cambios</button><a href="/clientes" class="btn btn-o">Cancelar</a></div>
     </form></div>"""
     return page(f"Editar - {d[1]}",body,"Clientes")
+
+@app.route("/wa_masivo", methods=["GET","POST"])
+@login_req
+def wa_masivo():
+    conn=conectar();c=conn.cursor()
+    c.execute("""SELECT cl.id,cl.nombre,cl.telefono,cl.condicion_fiscal,
+                        COALESCE(SUM(cu.debe-cu.haber),0) saldo
+                 FROM clientes cl
+                 LEFT JOIN cuentas cu ON cu.cliente_id=cl.id
+                 WHERE cl.telefono IS NOT NULL AND cl.telefono != ''
+                 GROUP BY cl.id,cl.nombre,cl.telefono,cl.condicion_fiscal
+                 ORDER BY cl.nombre""")
+    clientes_raw=c.fetchall(); conn.close()
+    flash=""
+
+    MSG_DEFAULT = (
+        "Estimado/a le recordamos ponerse al dia con sus honorarios. "
+        "De esta manera evitamos el freno de sus presentaciones y la acumulacion de deudas.\n\n"
+        "Puede solicitar el detalle por este medio o llegarse al estudio.\n\n"
+        "En caso de transferencia el alias de la contadora es:\n"
+        "estudio.conta.carlon\n"
+        "Titular Natasha Alexis Carlon"
+    )
+
+    if request.method=="POST":
+        accion=request.form.get("accion","")
+        mensaje=request.form.get("mensaje",MSG_DEFAULT).strip()
+        seleccionados=request.form.getlist("sel")
+        if accion=="enviar_seleccionados" and seleccionados:
+            if not CALLMEBOT_APIKEY:
+                flash='<div class="flash ferr">Configura CALLMEBOT_APIKEY en Render para envio automatico. Usa el boton WA manual por cliente.</div>'
+            else:
+                enviados=0; errores=[]
+                for cid in seleccionados:
+                    row=next((r for r in clientes_raw if str(r[0])==cid),None)
+                    if not row: continue
+                    _,nombre,tel_enc,_,_=row
+                    tel_d=(dec(tel_enc) or "").replace(" ","").replace("-","").replace("+","").strip()
+                    if not tel_d: continue
+                    num=f"54{tel_d}" if not tel_d.startswith("54") else tel_d
+                    nombre_c=nombre.split()[0] if nombre else "cliente"
+                    msg_final=f"Estimado/a {nombre_c},\n\n"+mensaje
+                    try:
+                        url=f"https://api.callmebot.com/whatsapp.php?phone={num}&text={urllib.parse.quote(msg_final)}&apikey={CALLMEBOT_APIKEY}"
+                        req2=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
+                        urllib.request.urlopen(req2,timeout=6)
+                        enviados+=1; time.sleep(0.6)
+                    except: errores.append(nombre)
+                registrar_auditoria("WA_MASIVO_GRAL",f"{enviados} enviados, {len(errores)} errores")
+                err_txt=(f" · Errores: {', '.join(errores[:4])}" if errores else "")
+                flash=f'<div class="flash fok">✅ {enviados} mensajes enviados{err_txt}</div>'
+
+    # Build client rows with checkboxes
+    filas=""
+    for row in clientes_raw:
+        cid,nombre,tel_enc,cond,saldo=row
+        tel_d=dec(tel_enc) if tel_enc else "---"
+        tel_limpio=(tel_d or "").replace(" ","").replace("-","")
+        tiene_deuda = saldo>0
+        deuda_badge=(f'<span style="color:var(--danger);font-size:.74rem;font-weight:700">{fmt(saldo)}</span>' if tiene_deuda else "")
+        cond_badge=f'<span style="font-size:.68rem;background:#f0f4ff;color:#185FA5;padding:2px 6px;border-radius:6px;font-weight:600">{cond or "---"}</span>'
+        # WA manual link with default message
+        nombre_c=nombre.split()[0] if nombre else "cliente"
+        msg_prev=f"Estimado/a {nombre_c}, "+MSG_DEFAULT
+        wa_link=(f"https://wa.me/54{tel_limpio}?text={urllib.parse.quote(msg_prev)}" if tel_limpio and tel_d!="---" else "#")
+        filas+=(f'''<div class="arow" style="align-items:center">
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="checkbox" name="sel" value="{cid}" id="chk{cid}"
+              {"checked" if tiene_deuda else ""}
+              style="width:18px;height:18px;cursor:pointer;accent-color:var(--primary)">
+            <label for="chk{cid}" style="cursor:pointer">
+              <span style="font-weight:600;color:var(--primary)">{nombre}</span>
+              {cond_badge} {deuda_badge}
+              <br><span style="font-size:.73rem;color:var(--muted)">📱 {tel_d}</span>
+            </label>
+          </div>
+          <a href="{wa_link}" target="_blank" class="btn btn-wa btn-xs">WA manual</a>
+        </div>''')
+
+    n_deuda=sum(1 for r in clientes_raw if r[4]>0)
+
+    body=f"""
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">← Volver</a>
+    <h1 class="page-title">📱 WA Masivo — Recordatorio General</h1>
+    <p class="page-sub">Seleccioná los clientes y editá el mensaje antes de enviar</p>
+    {flash}
+    <form method="post">
+      <input type="hidden" name="accion" value="enviar_seleccionados">
+      <div class="fcard" style="margin-bottom:16px">
+        <h3>✏️ Mensaje a enviar</h3>
+        <div class="info-box" style="margin-bottom:10px;font-size:.8rem">
+          El mensaje se envía como: <b>"Estimado/a [Nombre], [tu mensaje]"</b>
+        </div>
+        <textarea name="mensaje" rows="7"
+          style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;
+          font-family:'DM Sans',sans-serif;font-size:.87rem;resize:vertical;outline:none;
+          line-height:1.6;background:var(--bg)">{MSG_DEFAULT}</textarea>
+      </div>
+      <div class="fcard" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+          <h3 style="margin-bottom:0">{len(clientes_raw)} clientes con WhatsApp</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" onclick="selectAll(true)" class="btn btn-o btn-sm">Seleccionar todos</button>
+            <button type="button" onclick="selectAll(false)" class="btn btn-o btn-sm">Deseleccionar</button>
+            <button type="button" onclick="selectDeuda()" class="btn btn-a btn-sm">Solo con deuda ({n_deuda})</button>
+          </div>
+        </div>
+        {filas}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button type="submit" class="btn btn-wa">📱 Enviar a seleccionados (automático)</button>
+      </div>
+      {"<div class=warn-box style=margin-top:14px>⚠️ Para envio automático necesitas CALLMEBOT_APIKEY. El botón <b>WA manual</b> por cliente funciona siempre.</div>" if not CALLMEBOT_APIKEY else ""}
+    </form>
+    <script>
+    function selectAll(v){{document.querySelectorAll('input[name=sel]').forEach(c=>c.checked=v)}}
+    function selectDeuda(){{
+      document.querySelectorAll('.arow').forEach(row=>{{
+        var chk=row.querySelector('input[name=sel]');
+        var tieneDeuda=row.querySelector('span[style*="danger"]');
+        if(chk) chk.checked=!!tieneDeuda;
+      }})
+    }}
+    </script>"""
+    return page("WA Masivo", body, "Clientes")
 
 @app.route("/wa_facturas_preview", methods=["GET","POST"])
 @login_req
@@ -1772,6 +1899,23 @@ def borrar_cliente(id):
     c.execute("DELETE FROM cuentas WHERE cliente_id=%s",(id,));c.execute("DELETE FROM pagos WHERE cliente_id=%s",(id,));c.execute("DELETE FROM clientes WHERE id=%s",(id,))
     conn.commit();conn.close();registrar_auditoria("BAJA CLIENTE","Cliente eliminado",id,nombre);return redirect("/clientes")
 
+@app.route("/borrar_pago/<int:cliente_id>/<path:periodo>")
+@admin_req
+def borrar_pago(cliente_id, periodo):
+    periodo = periodo.replace("-","/")
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
+    row=c.fetchone(); nombre=row[0] if row else "?"
+    # Restar del haber lo que se habia cobrado en ese periodo
+    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
+    total_pago=c.fetchone()[0]
+    c.execute("DELETE FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
+    c.execute("UPDATE cuentas SET haber=GREATEST(COALESCE(haber,0)-%s,0) WHERE cliente_id=%s AND periodo=%s",
+              (total_pago,cliente_id,periodo))
+    conn.commit();conn.close()
+    registrar_auditoria("BORRAR_PAGO",f"Eliminado pago de {fmt(total_pago)} periodo {periodo}",cliente_id,nombre)
+    return redirect(f"/cuenta/{cliente_id}")
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CUENTA / PAGOS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1816,27 +1960,26 @@ def cuenta(id):
         else:
             badge='<span class="badge bd">DEBE '+fmt(saldo)+'</span>'
         pu=d[0].replace("/","-")
-        # boton pagar
+        per_esc=d[0].replace('/','-')
         if saldo>0.5:
-            bp='<button onclick="abrirPago(\"'+d[0]+'\",'+str(round(saldo))+')" class="btn btn-xs btn-g">Pagar</button>'
+            bp='<button onclick="abrirPago(\''+d[0]+'\',' +str(round(saldo))+')" class="btn btn-xs btn-g">Pagar</button>'
         else:
             bp='<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
-        # boton arca
-        ba='<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar a ARCA">ARCA</a>'
-        bc=('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px" title="Ver constancia">Const.</a>' if cuit_limpio else "")
-        # boton whatsapp
+        ba='<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
+        bc=('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px">Const.</a>' if cuit_limpio else "")
         if telefono and saldo>0.5:
-            bw='<button onclick="abrirWA(\"'+d[0]+'\",'+str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
+            bw='<button onclick="abrirWA(\''+d[0]+'\',' +str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
         else:
             bw=""
+        bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar pago de '+d[0]+'?\')" title="Eliminar">🗑</a>' if session.get('rol')=='admin' else '')
         filas+=('<div class="arow">'
                +'<span class="period">'+d[0]+'</span>'
                +'<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'
                +badge
                +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
-               +'<a href="/recibo/'+str(id)+'/'+pu+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
-               +'<a href="/recibo/'+str(id)+'/'+pu+'?download=1" class="btn btn-xs btn-o">PDF</a>'
-               +bp+ba+bc+bw+'</div></div>')
+               +'<a href="/recibo/'+str(id)+'/'+per_esc+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
+               +'<a href="/recibo/'+str(id)+'/'+per_esc+'?download=1" class="btn btn-xs btn-o">PDF</a>'
+               +bp+ba+bc+bw+bdel+'</div></div>')
     hist_rows=""
     for h in historial:
         fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
