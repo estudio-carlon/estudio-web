@@ -508,6 +508,8 @@ def actualizar_db():
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS actividad TEXT",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS envio_wa_facturas BOOLEAN DEFAULT FALSE",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsable_inscripto BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE",
+        "UPDATE clientes SET activo=TRUE WHERE activo IS NULL",
     ]:
         try: c.execute(ddl)
         except: conn.rollback()
@@ -861,30 +863,6 @@ def panel():
     {alertas}
     <div id="dolar-bar" style="background:var(--card);border-radius:var(--r);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Dólar BNA hoy</span><div id="dolar-val" style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--primary)">cargando...</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Compra</span><div id="dolar-cmp" style="font-size:.95rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Venta</span><div id="dolar-vta" style="font-size:.95rem;font-weight:600;color:var(--danger)">---</div></div></div><div style="text-align:right"><div id="reloj" style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)"></div><div id="fecha-hoy" style="font-size:.74rem;color:var(--muted)"></div></div></div>
     <script>
-    // Reloj en tiempo real
-    function tick(){{
-      var n=new Date();
-      var d=n.getDate().toString().padStart(2,"0");
-      var m=(n.getMonth()+1).toString().padStart(2,"0");
-      var y=n.getFullYear();
-      var H=n.getHours().toString().padStart(2,"0");
-      var M=n.getMinutes().toString().padStart(2,"0");
-      var S=n.getSeconds().toString().padStart(2,"0");
-      var dias=["Domingo","Lunes","Martes","Miercoles","Jueves","Viernes","Sabado"];
-      document.getElementById("reloj").textContent=H+":"+M+":"+S;
-      document.getElementById("fecha-hoy").textContent=dias[n.getDay()]+" "+d+"/"+m+"/"+y;
-    }}
-    tick(); setInterval(tick,1000);
-    // Cotizacion dolar BNA via DolarApi.ar
-    fetch("https://dolarapi.com/v1/dolares/oficial")
-      .then(r=>r.json())
-      .then(d=>{{
-        document.getElementById("dolar-val").textContent="Oficial BNA";
-        document.getElementById("dolar-cmp").textContent="$"+d.compra.toLocaleString("es-AR",{{minimumFractionDigits:2}});
-        document.getElementById("dolar-vta").textContent="$"+d.venta.toLocaleString("es-AR",{{minimumFractionDigits:2}});
-      }})
-      .catch(()=>{{document.getElementById("dolar-val").textContent="Sin conexion";}});
-    </script>
     // Reloj en tiempo real
     function tick(){{
       var n=new Date();
@@ -1668,8 +1646,8 @@ def clientes():
                if tab_cl=="baja" else
                str(len(data_raw))+" clientes activos · "+str(n_ri)+" Resp. Inscriptos · "+str(n_wa)+" con WA")
     wa_btns = btn_wa_masivo if tab_cl=="activos" else ""
-    form_open = '<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""
-    form_close = '</form></div>' if tab_cl=="activos" else ""
+    form_open = '<div class="fcard"><h3>Nuevo Cliente</h3><form method="post"><div class="fgrid">' if tab_cl=="activos" else ""
+    form_close = '</div></form></div>' if tab_cl=="activos" else ""
     body=f"""
     <h1 class="page-title">Clientes</h1>
     <p class="page-sub">{sub_txt}</p>
@@ -1690,7 +1668,6 @@ def clientes():
         <div class="fg"><label>Teléfono WhatsApp (sin 0 ni 15)</label><input name="telefono" placeholder="3855123456" id="tel-inp"></div>
         <div class="fg"><label>Email</label><input name="email" type="email" placeholder="cliente@email.com"></div>
         <div class="fg"><label>Honorarios $ / mes</label><input name="abono" type="number" placeholder="0"></div>
-      </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
         <input type="checkbox" name="envio_wa_facturas" value="1" id="wa-chk" style="width:auto">
         <label style="font-size:.84rem;cursor:pointer" for="wa-chk">📱 Enviar recordatorio WhatsApp de facturas de compras a fin de mes</label>
@@ -1712,7 +1689,7 @@ def clientes():
     function confBorrar(id,nm,e){{e.preventDefault();document.getElementById('mb-nm').textContent=nm;document.getElementById('mb-ok').href='/borrar_cliente/'+id;document.getElementById('mb').classList.add('on')}}
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
-    document.getElementById('wa-chk').addEventListener('change',function(){{document.getElementById('wa-hint').style.display=this.checked?'block':'none'}})
+    var waChk=document.getElementById('wa-chk');if(waChk)waChk.addEventListener('change',function(){{document.getElementById('wa-hint').style.display=this.checked?'block':'none'}})
     function buscarArca(){{var c=document.getElementById('cuit-inp').value.replace(/-/g,'').replace(/ /g,'');if(!c){{alert('Ingresá el CUIT');return;}}window.open('https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+c,'_blank')}}
     function buscarIIBB(){{var c=document.getElementById('cuit-inp').value.replace(/-/g,'').replace(/ /g,'');if(!c){{alert('Ingresá el CUIT');return;}}window.open('http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit='+c,'_blank')}}
     </script>"""
