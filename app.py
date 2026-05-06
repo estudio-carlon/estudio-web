@@ -2051,13 +2051,15 @@ def cuenta(id):
         pu=d[0].replace("/","-")
         per_esc=d[0].replace('/','-')
         if saldo>0.5:
-            bp='<button onclick="abrirPago(\''+d[0]+'\',' +str(round(saldo))+')" class="btn btn-xs btn-g">Pagar</button>'
+            bp=('<button data-per="'+d[0]+'" data-sal="'+str(round(saldo))+'"'
+                +' class="btn btn-xs btn-g pagarBtn">Pagar</button>')
         else:
             bp='<span style="color:var(--success);font-size:.73rem;font-weight:600">Al dia</span>'
         ba='<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca">ARCA</a>'
         bc=('<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+cuit_limpio+'" target="_blank" class="btn btn-xs" style="background:#6a1b9a;color:#fff;padding:3px 8px;font-size:.71rem;border-radius:6px">Const.</a>' if cuit_limpio else "")
         if telefono and saldo>0.5:
-            bw='<button onclick="abrirWA(\''+d[0]+'\',' +str(round(saldo))+')" class="btn btn-xs btn-wa">WA</button>'
+            bw=('<button data-per="'+d[0]+'" data-sal="'+str(round(saldo))+'"'
+                +' class="btn btn-xs btn-wa waBtn">WA</button>')
         else:
             bw=""
         bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar pago de '+d[0]+'?\')" title="Eliminar">🗑</a>' if session.get('rol')=='admin' else '')
