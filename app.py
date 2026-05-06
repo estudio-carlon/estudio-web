@@ -286,6 +286,43 @@ nav{background:var(--primary);padding:0 28px;display:flex;align-items:center;jus
 .sec-badge.ok{background:#d5f5e3;color:#1a7a42}
 .sec-badge.warn{background:#fef3cd;color:#9a6700}
 .sec-badge.danger{background:#fde8e8;color:#c0392b}
+
+/* ── App móvil supervisor ──────────────────────────────────────────── */
+.app-wrap{max-width:480px;margin:0 auto;padding:16px 14px;min-height:100vh}
+.app-header{text-align:center;padding:18px 0 10px;margin-bottom:6px}
+.app-title{font-family:'DM Serif Display',serif;font-size:1.5rem;color:var(--primary);margin-bottom:3px}
+.app-date{font-size:.78rem;color:var(--muted)}
+.caja-card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+.caja-card h2{font-family:'DM Serif Display',serif;font-size:1.05rem;color:var(--primary);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.app-input-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.app-field{display:flex;flex-direction:column;gap:5px}
+.app-field label{font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.app-field input,.app-field select,.app-field textarea{padding:11px 12px;border:2px solid var(--border);border-radius:10px;font-family:'DM Sans',sans-serif;font-size:.95rem;background:var(--bg);outline:none;transition:border-color .18s;-webkit-appearance:none}
+.app-field input:focus,.app-field select:focus{border-color:var(--primary);background:#fff}
+.app-field input[type=number]{font-size:1.1rem;font-weight:600;color:var(--primary)}
+.btn-app{width:100%;padding:14px;border-radius:12px;font-family:'DM Sans',sans-serif;font-size:1rem;font-weight:700;cursor:pointer;border:none;margin-top:6px;transition:all .18s;letter-spacing:.2px}
+.btn-app-g{background:var(--success);color:#fff}.btn-app-g:active{background:#1f9149;transform:scale(.98)}
+.btn-app-r{background:var(--danger);color:#fff}.btn-app-r:active{background:#a93226;transform:scale(.98)}
+.btn-app-b{background:var(--info);color:#fff}.btn-app-b:active{background:#1a5e8a;transform:scale(.98)}
+.btn-app-o{background:var(--accent);color:#fff}.btn-app-o:active{background:#b8955a;transform:scale(.98)}
+.cierre-row{background:var(--card);border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow)}
+.cierre-row.ok{border-left:4px solid var(--success)}.cierre-row.mal{border-left:4px solid var(--danger)}.cierre-row.pend{border-left:4px solid var(--warning)}
+.cierre-nombre{font-weight:700;font-size:.96rem;color:var(--primary)}
+.cierre-fecha{font-size:.72rem;color:var(--muted)}
+.medios-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
+.medio-chip{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 8px;text-align:center}
+.medio-chip .mc-lbl{font-size:.6rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px;display:block}
+.medio-chip .mc-val{font-family:'DM Serif Display',serif;font-size:.96rem;color:var(--primary);font-weight:600;display:block}
+.diff-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:.75rem;font-weight:700;margin-top:8px}
+.diff-ok{background:#d5f5e3;color:#1a7a42}.diff-mal{background:#fde8e8;color:#c0392b}.diff-pend{background:#fef3cd;color:#9a6700}
+.tab-bar{position:fixed;bottom:0;left:0;right:0;background:var(--primary);display:flex;z-index:100;box-shadow:0 -2px 12px rgba(0,0,0,.15)}
+.tab-item{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 4px 14px;cursor:pointer;color:rgba(255,255,255,.55);font-size:.62rem;font-weight:600;text-decoration:none;letter-spacing:.3px;transition:color .15s}
+.tab-item.act{color:var(--accent)}.tab-item span{font-size:1.3rem;margin-bottom:2px}
+.app-total-box{background:var(--primary);border-radius:14px;padding:16px 18px;color:#fff;margin-bottom:14px;text-align:center}
+.app-total-box .atl{font-size:.72rem;opacity:.7;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.app-total-box .atv{font-family:'DM Serif Display',serif;font-size:2rem}
+.app-flash{padding:12px 16px;border-radius:10px;margin-bottom:12px;font-size:.88rem;font-weight:600;text-align:center}
+.app-fok{background:#d5f5e3;color:#1a7a42}.app-ferr{background:#fde8e8;color:#c0392b}
 @media(max-width:680px){.stats{grid-template-columns:1fr 1fr}.arow{flex-direction:column;align-items:flex-start}nav .user-pill{display:none}.wrap{padding:18px 12px}.nav-links a{padding:5px 8px;font-size:.78rem}}
 """
 
@@ -351,11 +388,16 @@ function toggleChat(){
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
     links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/seguridad","🔒 Seguridad"),("/configuracion","⚙️ Config")]
+    links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
     links_sec=[("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda")]
-    links=links_admin if rol=="admin" else links_sec
+    if rol=="admin": links=links_admin
+    elif rol=="supervisor": links=links_sup
+    else: links=links_sec
     items="".join(f'<a href="{h}" class="{"act" if active==l else ""}">{l}</a>' for h,l in links)
     items+='<a href="/logout" class="logout">Salir</a>'
-    badge=f'<span class="rbadge {"admin" if rol=="admin" else "sec"}">{"Admin" if rol=="admin" else "Sec."}</span>'
+    badge_txt="Admin" if rol=="admin" else ("Sup." if rol=="supervisor" else "Sec.")
+    badge_cls="admin" if rol=="admin" else ("sec" if rol=="supervisor" else "sec")
+    badge=f'<span class="rbadge {badge_cls}">{badge_txt}</span>'
     return f'<nav><span class="brand">&#x2726; Estudio Carlon</span><div class="nav-links">{items}</div><div class="user-pill">&#x1F464; {disp} {badge}</div></nav>{ASISTENTE_JS}'
 
 def page(title,body,active=""):
@@ -624,7 +666,9 @@ def login():
                     session["display"]=data[2] or user
                     registrar_auditoria("LOGIN","Inicio de sesion")
                     registrar_evento_seguridad("LOGIN_OK",f"Login exitoso",ip,data[2] or user)
-                    return redirect("/panel" if session["rol"]=="admin" else "/clientes")
+                    if session["rol"]=="admin": return redirect("/panel")
+                    elif session["rol"]=="supervisor": return redirect("/app")
+                    else: return redirect("/clientes")
             else:
                 count = registrar_intento_fallido(ip)
                 restantes = max(0, MAX_INTENTOS - count)
@@ -1234,6 +1278,7 @@ def configuracion():
             <div class="fg"><label>Rol</label>
               <select name="rol">
                 <option value="secretaria">Secretaria</option>
+                <option value="supervisor">Supervisora (App móvil)</option>
                 <option value="admin">Administrador</option>
               </select>
             </div>
@@ -1350,6 +1395,7 @@ def configuracion():
           <label>Rol</label>
           <select name="nuevo_rol" id="me-rol">
             <option value="secretaria">Secretaria</option>
+            <option value="supervisor">Supervisora (App móvil)</option>
             <option value="admin">Administrador</option>
           </select>
         </div>
@@ -3148,6 +3194,246 @@ def importar():
         return redirect("/clientes")
     body='<h1 class="page-title">Importar Clientes</h1><p class="page-sub">Excel con columnas: <b>nombre y apellido</b>, cuit, telefono, honorario</p><div class="fcard"><h3>📂 Archivo Excel</h3><form method="post" enctype="multipart/form-data"><div class="fg" style="margin-bottom:14px"><label>Archivo .xlsx</label><input type="file" name="archivo" accept=".xlsx,.xls"></div><button class="btn btn-p">Importar</button></form></div>'
     return page("Importar",body)
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PWA MANIFEST
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/manifest.json")
+def manifest():
+    from flask import Response
+    data = json.dumps({
+        "name": "Estudio Carlon",
+        "short_name": "Carlon",
+        "start_url": "/app",
+        "display": "standalone",
+        "background_color": "#F7F5F0",
+        "theme_color": "#1A3A2A",
+        "icons": [
+            {"src": "https://placehold.co/192x192/1A3A2A/C8A96E?text=C", "sizes": "192x192", "type": "image/png"},
+            {"src": "https://placehold.co/512x512/1A3A2A/C8A96E?text=C", "sizes": "512x512", "type": "image/png"}
+        ]
+    })
+    return Response(data, mimetype="application/json")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  APP MOVIL SUPERVISORA
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/app", methods=["GET","POST"])
+@login_req
+def app_movil():
+    conn=conectar();c=conn.cursor();flash=""
+    hoy=datetime.now().strftime("%d/%m/%Y")
+    tab=request.args.get("tab","caja")
+    rol=session.get("rol","secretaria")
+    usuario=session.get("display","")
+
+    if request.method=="POST":
+        accion=request.form.get("accion","")
+        if accion=="registrar_arqueo":
+            ef=float(request.form.get("ef",0) or 0)
+            ch=float(request.form.get("ch",0) or 0)
+            dol=float(request.form.get("dol",0) or 0)
+            nota=request.form.get("nota","").strip()
+            total=ef+ch+dol
+            c.execute("INSERT INTO seguridad_eventos(tipo,detalle,ip,usuario,fecha) VALUES(%s,%s,%s,%s,%s)",
+                      ("ARQUEO",
+                       "Efectivo:"+fmt(ef)+" Cheque:"+fmt(ch)+" USD:"+fmt(dol)+" Total:"+fmt(total)+((" Nota:"+nota) if nota else ""),
+                       "app-movil",usuario,now_ar()))
+            conn.commit()
+            registrar_auditoria("ARQUEO_CAJA","Ef:"+fmt(ef)+" Ch:"+fmt(ch)+" U$S:"+fmt(dol)+" Total:"+fmt(total)+((" - "+nota) if nota else ""))
+            flash="ok:Arqueo guardado - Total fisico: "+fmt(total)
+        elif accion=="gasto_rapido":
+            cat=request.form.get("cat","Otros")
+            desc=request.form.get("desc","").strip()
+            monto_str=request.form.get("monto","0")
+            monto=float(monto_str) if monto_str else 0
+            if monto>0:
+                c.execute("INSERT INTO gastos(fecha,categoria,descripcion,monto,usuario) VALUES(%s,%s,%s,%s,%s)",
+                          (now_ar(),cat,desc,monto,usuario))
+                conn.commit()
+                registrar_auditoria("GASTO",cat+": "+fmt(monto)+" - "+desc)
+                flash="ok:Gasto registrado: "+fmt(monto)
+            else:
+                flash="err:Ingresa un monto"
+
+    # Datos
+    c.execute("SELECT fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE fecha=%s ORDER BY hora_cierre DESC",(hoy,))
+    cierres=c.fetchall()
+    c.execute("SELECT detalle,fecha FROM seguridad_eventos WHERE tipo='ARQUEO' AND fecha LIKE %s ORDER BY id DESC LIMIT 10",(hoy+"%",))
+    arqueos=c.fetchall()
+    c.execute("SELECT categoria,descripcion,monto,usuario FROM gastos WHERE fecha LIKE %s ORDER BY id DESC LIMIT 20",(hoy+"%",))
+    gastos_hoy=c.fetchall()
+    total_gastos_hoy=sum(g[2] for g in gastos_hoy)
+    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE fecha LIKE %s",(hoy+"%",))
+    total_cobrado=c.fetchone()[0]
+    conn.close()
+
+    # Flash
+    flash_html=""
+    if flash:
+        partes=flash.split(":",1)
+        ftipo=partes[0] if len(partes)>1 else "ok"
+        fmsg=partes[1] if len(partes)>1 else flash
+        fclass="app-fok" if ftipo=="ok" else "app-ferr"
+        flash_html='<div class="app-flash '+fclass+'">'+fmsg+'</div>'
+
+    # ── TAB CAJA
+    if tab=="caja":
+        cierres_html=""
+        for ci in cierres:
+            fci,uci,ef,ch,dol,nat,mai,otr,tf,tg,cerr,hora=ci
+            est_cls="ok" if cerr else "pend"
+            est_txt=("Cerrada "+hora) if cerr else "Abierta"
+            cierres_html+=(
+                '<div class="cierre-row '+est_cls+'">'
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+                '<div><div class="cierre-nombre">'+uci+'</div>'
+                '<div class="cierre-fecha">'+est_txt+'</div></div>'
+                '<div style="font-family:\'DM Serif Display\',serif;font-size:1.2rem;color:var(--primary)">'+fmt(tg or 0)+'</div>'
+                '</div>'
+                '<div class="medios-grid">'
+                '<div class="medio-chip"><span class="mc-lbl">Efectivo</span><span class="mc-val">'+fmt(ef or 0)+'</span></div>'
+                '<div class="medio-chip"><span class="mc-lbl">Cheque</span><span class="mc-val">'+fmt(ch or 0)+'</span></div>'
+                '<div class="medio-chip"><span class="mc-lbl">U$S</span><span class="mc-val">'+fmt(dol or 0)+'</span></div>'
+                '<div class="medio-chip"><span class="mc-lbl">Natasha</span><span class="mc-val">'+fmt(nat or 0)+'</span></div>'
+                '<div class="medio-chip"><span class="mc-lbl">Maira</span><span class="mc-val">'+fmt(mai or 0)+'</span></div>'
+                '<div class="medio-chip"><span class="mc-lbl">Total</span><span class="mc-val" style="color:var(--accent)">'+fmt(tg or 0)+'</span></div>'
+                '</div></div>'
+            )
+        if not cierres_html:
+            cierres_html='<p style="color:var(--muted);font-size:.85rem;text-align:center;padding:10px">Sin cierres hoy</p>'
+
+        arqueos_html=""
+        for aq in arqueos:
+            det,fec=aq
+            arqueos_html+=('<div style="background:var(--bg);border-radius:8px;padding:10px 12px;'
+                          'margin-bottom:8px;font-size:.82rem">'
+                          '<span style="color:var(--muted);font-size:.72rem">'+fec+'</span><br>'+det+'</div>')
+
+        content_tab=(
+            '<div class="app-total-box">'
+            '<div class="atl">Total cobrado hoy</div>'
+            '<div class="atv">'+fmt(total_cobrado)+'</div>'
+            '</div>'
+            '<div class="caja-card">'
+            '<h2>Cierres de hoy <span style="font-size:.75rem;color:var(--muted)">'+str(len(cierres))+' sec.</span></h2>'
+            +cierres_html+
+            '</div>'
+            '<div class="caja-card">'
+            '<h2>Registrar Arqueo</h2>'
+            '<p style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Conta el dinero fisico del estudio.</p>'
+            '<form method="post">'
+            '<input type="hidden" name="accion" value="registrar_arqueo">'
+            '<div class="app-input-row">'
+            '<div class="app-field"><label>Efectivo $</label><input type="number" name="ef" placeholder="0" step="100"></div>'
+            '<div class="app-field"><label>Cheque $</label><input type="number" name="ch" placeholder="0" step="100"></div>'
+            '</div>'
+            '<div class="app-input-row">'
+            '<div class="app-field"><label>Dolares $</label><input type="number" name="dol" placeholder="0"></div>'
+            '<div class="app-field"><label>Nota</label><input type="text" name="nota" placeholder="Opcional"></div>'
+            '</div>'
+            '<button type="submit" class="btn-app btn-app-g">Guardar Arqueo</button>'
+            '</form></div>'
+            +(('<div class="caja-card"><h2>Arqueos de hoy</h2>'+arqueos_html+'</div>') if arqueos else "")
+        )
+
+    # ── TAB GASTOS
+    elif tab=="gastos":
+        cats_disp=CATEGORIAS_GASTO if rol in ("admin","supervisor") else CATEGORIAS_SEC
+        opts_cats="".join('<option value="'+c2+'">'+c2+'</option>' for c2 in cats_disp)
+        gastos_list=""
+        for g in gastos_hoy:
+            gastos_list+=(
+                '<div style="display:flex;justify-content:space-between;align-items:center;'
+                'padding:10px 0;border-bottom:1px solid var(--border)">'
+                '<div><span style="font-size:.82rem;font-weight:600">'+(g[1] or g[0])+'</span><br>'
+                '<span class="bmedio" style="font-size:.65rem">'+g[0]+'</span> '
+                '<span style="font-size:.7rem;color:var(--muted)">'+g[3]+'</span></div>'
+                '<span style="font-family:\'DM Serif Display\',serif;color:var(--danger);font-size:1rem">'+fmt(g[2])+'</span>'
+                '</div>'
+            )
+        if not gastos_list:
+            gastos_list='<p style="color:var(--muted);font-size:.85rem;text-align:center;padding:10px">Sin gastos hoy</p>'
+        content_tab=(
+            '<div class="app-total-box" style="background:var(--danger)">'
+            '<div class="atl">Gastos de hoy</div>'
+            '<div class="atv">'+fmt(total_gastos_hoy)+'</div>'
+            '</div>'
+            '<div class="caja-card"><h2>Registrar Gasto</h2>'
+            '<form method="post">'
+            '<input type="hidden" name="accion" value="gasto_rapido">'
+            '<div class="app-field" style="margin-bottom:12px"><label>Categoria</label><select name="cat">'+opts_cats+'</select></div>'
+            '<div class="app-field" style="margin-bottom:12px"><label>Descripcion</label><input type="text" name="desc" placeholder="Detalle..."></div>'
+            '<div class="app-field" style="margin-bottom:12px"><label>Monto $</label><input type="number" name="monto" placeholder="0" step="100" required></div>'
+            '<button type="submit" class="btn-app btn-app-r">Registrar Gasto</button>'
+            '</form></div>'
+            '<div class="caja-card"><h2>Gastos de hoy</h2>'
+            +gastos_list+
+            (('<div style="text-align:right;font-weight:700;padding-top:10px;color:var(--danger)">Total: '+fmt(total_gastos_hoy)+'</div>') if gastos_hoy else "")
+            +'</div>'
+        )
+
+    # ── TAB RESUMEN
+    else:
+        tab="resumen"
+        total_ef=sum((ci[2] or 0) for ci in cierres)
+        total_ch=sum((ci[3] or 0) for ci in cierres)
+        total_dol=sum((ci[4] or 0) for ci in cierres)
+        total_nat=sum((ci[5] or 0) for ci in cierres)
+        total_mai=sum((ci[6] or 0) for ci in cierres)
+        total_gen=sum((ci[9] or 0) for ci in cierres)
+        content_tab=(
+            '<div class="caja-card"><h2>Resumen del dia</h2>'
+            '<div class="medios-grid" style="grid-template-columns:1fr 1fr;gap:10px">'
+            '<div class="medio-chip"><span class="mc-lbl">Total Cobrado</span><span class="mc-val" style="font-size:1.1rem;color:var(--success)">'+fmt(total_cobrado)+'</span></div>'
+            '<div class="medio-chip"><span class="mc-lbl">Total Gastos</span><span class="mc-val" style="font-size:1.1rem;color:var(--danger)">'+fmt(total_gastos_hoy)+'</span></div>'
+            '<div class="medio-chip"><span class="mc-lbl">Efectivo</span><span class="mc-val">'+fmt(total_ef)+'</span></div>'
+            '<div class="medio-chip"><span class="mc-lbl">Cheque</span><span class="mc-val">'+fmt(total_ch)+'</span></div>'
+            '<div class="medio-chip"><span class="mc-lbl">U$S</span><span class="mc-val">'+fmt(total_dol)+'</span></div>'
+            '<div class="medio-chip"><span class="mc-lbl">Natasha</span><span class="mc-val">'+fmt(total_nat)+'</span></div>'
+            '<div class="medio-chip"><span class="mc-lbl">Maira</span><span class="mc-val">'+fmt(total_mai)+'</span></div>'
+            '<div class="medio-chip" style="background:var(--primary);border-color:var(--primary)"><span class="mc-lbl" style="color:rgba(255,255,255,.7)">TOTAL</span><span class="mc-val" style="color:var(--accent);font-size:1.1rem">'+fmt(total_gen)+'</span></div>'
+            '</div>'
+            '<div style="margin-top:14px;font-size:.78rem;color:var(--muted);text-align:center">'+str(len(cierres))+' cierres - '+str(len(gastos_hoy))+' gastos - '+hoy+'</div>'
+            '</div>'
+            '<div class="caja-card"><h2>Accesos rapidos</h2>'
+            '<div style="display:flex;flex-direction:column;gap:10px">'
+            '<a href="/caja" class="btn-app btn-app-b" style="text-align:center;display:block;text-decoration:none;padding:13px">Ver Caja Completa</a>'
+            '<a href="/clientes" class="btn-app btn-app-o" style="text-align:center;display:block;text-decoration:none;padding:13px">Ver Clientes</a>'
+            '</div></div>'
+        )
+
+    act_caja="act" if tab=="caja" else ""
+    act_gas="act" if tab=="gastos" else ""
+    act_res="act" if tab=="resumen" else ""
+    tab_bar=(
+        '<div class="tab-bar">'
+        '<a href="/app?tab=caja" class="tab-item '+act_caja+'"><span>&#x1F3E6;</span>Caja</a>'
+        '<a href="/app?tab=gastos" class="tab-item '+act_gas+'"><span>&#x1F4DD;</span>Gastos</a>'
+        '<a href="/app?tab=resumen" class="tab-item '+act_res+'"><span>&#x1F4CA;</span>Resumen</a>'
+        '<a href="/logout" class="tab-item"><span>&#x1F6AA;</span>Salir</a>'
+        '</div>'
+    )
+
+    return ('<!DOCTYPE html><html lang="es"><head>'
+            '<meta charset="UTF-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">'
+            '<meta name="apple-mobile-web-app-capable" content="yes">'
+            '<meta name="apple-mobile-web-app-title" content="Estudio Carlon">'
+            '<meta name="theme-color" content="#1A3A2A">'
+            '<link rel="manifest" href="/manifest.json">'
+            '<title>Estudio Carlon</title>'
+            '<style>'+CSS+'body{padding-bottom:75px}</style>'
+            '</head><body>'
+            '<div class="app-wrap">'
+            '<div class="app-header">'
+            '<div class="app-title">Estudio Carlon</div>'
+            '<div class="app-date">Hola '+usuario+' - '+hoy+'</div>'
+            '</div>'
+            +flash_html+content_tab+
+            '</div>'+tab_bar+'</body></html>')
 
 if __name__=="__main__":
     app.run(debug=True)
