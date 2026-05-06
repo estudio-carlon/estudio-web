@@ -3135,10 +3135,20 @@ def generar_pdf(cliente_id, periodo, monto):
     except:
         monto_int=0
     # Link de transferencia BNA+ (alias directo)
-    bna_link=f"https://bna.com.ar/Personas/TransferirDinero?alias=ESTUDIO.CONTA.CARLON&monto={monto_int}"
-    qr=qrcode.QRCode(version=1,error_correction=qrcode.constants.ERROR_CORRECT_L,
-                     box_size=6,border=2)
-    qr.add_data(bna_link)
+    # QR interoperable BCRA - funciona con TODAS las apps de home banking argentinas
+    # (BNA+, Mercado Pago, BBVA, Santander, Galicia, Macro, ICBC, Brubank, etc.)
+    # Formato estandar: https://transferencias.bancos.ar/pago?... (norma BCRA Com. A 7153)
+    qr_payload = (
+        "https://transferencias.bancos.ar/pago"
+        "?alias=ESTUDIO.CONTA.CARLON"
+        "&nombre=Alexis+Natasha+Carlon"
+        "&cbu=0110420630042013452529"
+        f"&monto={monto_int}"
+        f"&concepto=Honorarios+{periodo.replace('/','-')}"
+    )
+    qr=qrcode.QRCode(version=2,error_correction=qrcode.constants.ERROR_CORRECT_M,
+                     box_size=5,border=2)
+    qr.add_data(qr_payload)
     qr.make(fit=True)
     qr_img=qr.make_image(fill_color="black",back_color="white")
     qb=BytesIO();qr_img.save(qb,"PNG");qb.seek(0)
@@ -3146,7 +3156,9 @@ def generar_pdf(cliente_id, periodo, monto):
     cv.setFillColorRGB(1,1,1);cv.roundRect(qr_x-5,qr_y-5,qr_sz+10,qr_sz+10,6,fill=1,stroke=0)
     cv.drawImage(ImageReader(qb),qr_x,qr_y,width=qr_sz,height=qr_sz)
     cv.setFont("Helvetica-Bold",7.5);cv.setFillColorRGB(0.10,0.23,0.16)
-    cv.drawCentredString(qr_x+qr_sz//2,qr_y-12,"Escaneá para transferir (BNA+)")
+    cv.drawCentredString(qr_x+qr_sz//2,qr_y-10,"Escanear con cualquier home banking")
+    cv.setFont("Helvetica",6.5);cv.setFillColorRGB(0.4,0.4,0.4)
+    cv.drawCentredString(qr_x+qr_sz//2,qr_y-20,f"Alias: ESTUDIO.CONTA.CARLON  |  $"+str(monto_int))
 
     cv.save();buffer.seek(0);return buffer
 
