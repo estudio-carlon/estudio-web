@@ -624,7 +624,7 @@ def setup():
   <button class="btn btn-p" style="width:100%;justify-content:center">Crear Administrador</button>
 </form>
 <div style="margin-top:12px;text-align:center">
-  <a href="/" style="color:var(--muted);font-size:.8rem">← Volver al login</a>
+  <a href="/" style="color:var(--muted);font-size:.8rem">&larr; Volver al login</a>
 </div>
 </div></div></body></html>'''
 
@@ -744,7 +744,7 @@ def reset_2fa():
   <button class="btn btn-r" style="width:100%;justify-content:center">Desactivar 2FA en todos los usuarios</button>
 </form>
 <div style="margin-top:12px;text-align:center">
-  <a href="/" style="color:var(--muted);font-size:.8rem">← Volver al login</a>
+  <a href="/" style="color:var(--muted);font-size:.8rem">&larr; Volver al login</a>
 </div>
 </div></div></body></html>'''
 
@@ -787,7 +787,7 @@ def verificar_2fa():
   <button class="btn btn-p" style="width:100%;justify-content:center">Verificar</button>
 </form>
 <div style="margin-top:12px;text-align:center">
-  <a href="/" style="color:var(--muted);font-size:.8rem">← Volver al login</a>
+  <a href="/" style="color:var(--muted);font-size:.8rem">&larr; Volver al login</a>
 </div>
 </div></div></body></html>'''
 
@@ -1493,7 +1493,7 @@ def mi_2fa():
         <span style="color:var(--muted);font-size:.74rem">Usá esto si no podés escanear el QR</span>
       </div>
       <div style="margin-top:16px">
-        <a href="/configuracion" class="btn btn-p">← Volver a configuración</a>
+        <a href="/configuracion" class="btn btn-p">&larr; Volver a configuración</a>
       </div>
     </div>"""
     return page("Mi 2FA", body)
@@ -1610,20 +1610,29 @@ def clientes():
     n_wa=sum(1 for d in data_raw if d[9])
     form_nuevo_cli='<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""
     form_cierre_cli='      </div>\n    </form></div>' if tab_cl=="activos" else ""
+    # Pre-compute tab classes to avoid quote conflicts in f-string
+    tab_act_cls = "on" if tab_cl=="activos" else ""
+    tab_bja_cls = "on" if tab_cl=="baja" else ""
+    n_activos = len(data_raw) if tab_cl=="activos" else ""
+    sub_txt = ("Dados de baja: "+str(len(data_raw))+" clientes"
+               if tab_cl=="baja" else
+               str(len(data_raw))+" clientes activos · "+str(n_ri)+" Resp. Inscriptos · "+str(n_wa)+" con WA")
+    wa_btns = btn_wa_masivo if tab_cl=="activos" else ""
+    form_open = '<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""
+    form_close = '</form></div>' if tab_cl=="activos" else ""
     body=f"""
     <h1 class="page-title">Clientes</h1>
-    <p class="page-sub">{"Dados de baja: "+str(len(data_raw))+" clientes" if tab_cl=="baja" else str(len(data_raw))+" clientes activos · "+str(n_ri)+" Resp. Inscriptos · "+str(n_wa)+" con WA"}</p>
+    <p class="page-sub">{sub_txt}</p>
     {flash}
     <div class="tabs" style="margin-bottom:0">
-      <button class="tab {"on" if tab_cl=="activos" else ""}" onclick="window.location.href='/clientes?tab=activos'">👥 Activos ({len(data_raw) if tab_cl=="activos" else ""})</button>
-      <button class="tab {"on" if tab_cl=="baja" else ""}" onclick="window.location.href='/clientes?tab=baja'">🚫 Dados de baja ({n_baja})</button>
+      <button class="tab {tab_act_cls}" onclick="window.location.href='/clientes?tab=activos'">👥 Activos</button>
+      <button class="tab {tab_bja_cls}" onclick="window.location.href='/clientes?tab=baja'">🚫 Dados de baja ({n_baja})</button>
     </div>
     <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap">
-      {btn_wa_masivo if tab_cl=="activos" else ""}
+      {wa_btns}
       <a href="/exportar/excel/clientes" class="btn btn-g btn-sm">📊 Excel Clientes</a>
     </div>
-    {'<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""}
-      <div class="fgrid">
+    {form_open}
         <div class="fg"><label>Nombre / Razón Social</label><input name="nombre" required placeholder="Garcia Juan"></div>
         <div class="fg"><label>CUIT</label><input name="cuit" placeholder="20-12345678-9" id="cuit-inp"></div>
         <div class="fg"><label>Condición Fiscal</label><select name="condicion_fiscal">{cond_opts}</select></div>
@@ -1640,10 +1649,9 @@ def clientes():
       <div class="info-box" style="margin-bottom:12px">🔒 CUIT, teléfono y email se guardan encriptados.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-p">Guardar Cliente</button>
-        <button type="button" class="btn btn-arca btn-sm" onclick="buscarArca()">🔍 Ver constancia ARCA</button>
-        <button type="button" class="btn btn-sm" style="background:#6a1b9a;color:#fff" onclick="buscarIIBB()">🔍 Ver constancia IIBB</button>
-      </div>
-    {form_cierre_cli}
+        <button type="button" class="btn btn-arca btn-sm" onclick="buscarArca()">Ver constancia ARCA</button>
+        <button type="button" class="btn btn-sm" style="background:#6a1b9a;color:#fff" onclick="buscarIIBB()">Ver constancia IIBB</button>
+    {form_close}
     <div class="search"><span>🔍</span><input id="bus" placeholder="Buscar por nombre, CUIT, actividad..." oninput="filt(this.value)"></div>
     <div class="dtable"><table>
       <thead><tr><th>Nombre</th><th>CUIT / Cond.</th><th>Teléfono</th><th>Email</th><th>Honorarios</th><th>Acciones</th></tr></thead>
@@ -1690,12 +1698,12 @@ def editar_cliente(id):
     cond_opts="".join(f'<option value="{cf}" {"selected" if cf==condicion else ""}>{cf}</option>' for cf in CONDICIONES_FISCALES)
     wa_checked="checked" if wa_f else ""
     body=f"""
-    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">← Volver a Clientes</a>
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Volver a Clientes</a>
     <h1 class="page-title">Editar Cliente</h1>
     <p class="page-sub">{d[1]}</p>
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      {"<a href=\'https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit="+cuit_limpio+"\' target=\'_blank\' class=\'btn btn-arca btn-sm\'>🔍 Constancia ARCA</a>" if cuit_limpio else ""}
-      {"<a href=\'http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit="+cuit_limpio+"\' target=\'_blank\' class=\'btn btn-sm\' style=\'background:#6a1b9a;color:#fff\'>🔍 Constancia IIBB</a>" if cuit_limpio else ""}
+      {"<a href=\'https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit="+cuit_limpio+"\' target=\'_blank\' class=\'btn btn-arca btn-sm\'>Ver Constancia ARCA</a>" if cuit_limpio else ""}
+      {"<a href=\'http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit="+cuit_limpio+"\' target=\'_blank\' class=\'btn btn-sm\' style=\'background:#6a1b9a;color:#fff\'>Ver Constancia IIBB</a>" if cuit_limpio else ""}
     </div>
     <div class="fcard"><form method="post">
       <div class="fgrid">
@@ -1709,7 +1717,7 @@ def editar_cliente(id):
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
         <input type="checkbox" name="envio_wa_facturas" value="1" id="wa-chk" {wa_checked} style="width:auto">
-        <label style="font-size:.84rem;cursor:pointer" for="wa-chk">📱 Enviar recordatorio WA de facturas a fin de mes</label>
+        <label style="font-size:.84rem;cursor:pointer" for="wa-chk">Enviar recordatorio WA de facturas a fin de mes</label>
       </div>
       <div style="display:flex;gap:8px"><button class="btn btn-p">Guardar Cambios</button><a href="/clientes" class="btn btn-o">Cancelar</a></div>
     </form></div>"""
@@ -1794,7 +1802,7 @@ def wa_masivo():
     n_deuda=sum(1 for r in clientes_raw if r[4]>0)
 
     body=f"""
-    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">← Volver</a>
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">&larr; Volver</a>
     <h1 class="page-title">📱 WA Masivo — Recordatorio General</h1>
     <p class="page-sub">Seleccioná los clientes y editá el mensaje antes de enviar</p>
     {flash}
@@ -1970,7 +1978,7 @@ def wa_facturas_preview():
                    else "No hay clientes con deuda pendiente.")                 +'</div>' if not data else "")
 
     body=f"""
-    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">← Volver</a>
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">&larr; Volver</a>
     <h1 class="page-title">{tipo_titulo}</h1>
     <p class="page-sub">{mes_nombre} {hoy.year} · {len(data)} clientes</p>
     {flash}
@@ -2195,7 +2203,7 @@ def cuenta(id):
                     +btn_edit+'</div>')
     medios_opts="".join(f'<option value="{m}">{m}</option>' for m in MEDIOS_PAGO)
     body=f"""
-    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">← Clientes</a>
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Clientes</a>
     <h1 class="page-title">{nombre}</h1>
     <p class="page-sub">CUIT: {cuit or "---"} · Tel: {tel or "---"} · {email or "---"}</p>
     <div class="stats" style="margin-bottom:16px">
