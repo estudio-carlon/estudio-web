@@ -3622,61 +3622,72 @@ def app_movil():
             '</div>'+tab_bar+'</body></html>')
 
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  NOVEDADES
 # ══════════════════════════════════════════════════════════════════════════════
 @app.route("/novedades")
-@login_req  
+@login_req
 def novedades():
-    dolar_script = (
+    rol = session.get("rol","secretaria")
+    script = (
         "<script>"
         "fetch('https://dolarapi.com/v1/dolares/oficial').then(r=>r.json()).then(d=>{"
-        "document.getElementById('nc').textContent='$'+d.compra.toLocaleString('es-AR',{minimumFractionDigits:2});"
-        "document.getElementById('nv').textContent='$'+d.venta.toLocaleString('es-AR',{minimumFractionDigits:2});"
-        "document.getElementById('idx-oficial').textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "var f=function(n){return '$'+n.toLocaleString('es-AR',{minimumFractionDigits:2})};"
+        "document.getElementById('nc').textContent=f(d.compra);"
+        "document.getElementById('nv').textContent=f(d.venta);"
+        "var od=document.getElementById('idx-oficial');if(od)od.textContent=f(d.venta);"
+        "}).catch(()=>{});"
+        "fetch('https://dolarapi.com/v1/dolares/tarjeta').then(r=>r.json()).then(d=>{"
+        "var f=function(n){return '$'+n.toLocaleString('es-AR',{minimumFractionDigits:2})};"
+        "var el=document.getElementById('nd');if(el)el.textContent=f(d.venta);"
         "}).catch(()=>{});"
         "fetch('https://dolarapi.com/v1/dolares/bolsa').then(r=>r.json()).then(d=>{"
-        "document.getElementById('idx-mep').textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "var el=document.getElementById('idx-mep');if(el)el.textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
         "}).catch(()=>{});"
         "fetch('https://dolarapi.com/v1/dolares/blue').then(r=>r.json()).then(d=>{"
-        "document.getElementById('idx-blue').textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
+        "var el=document.getElementById('idx-blue');if(el)el.textContent='$'+d.venta.toLocaleString('es-AR',{maximumFractionDigits:0});"
         "}).catch(()=>{});"
         "fetch('https://apis.datos.gob.ar/series/api/series/?ids=143.3_SALM_DICI_0_36_6&limit=1&sort=desc&format=json')"
         ".then(r=>r.json()).then(d=>{"
-        "if(d.data&&d.data.length){var v=parseFloat(d.data[0][1]);"
-        "document.getElementById('smvym-val').textContent='$'+v.toLocaleString('es-AR',{maximumFractionDigits:0});"
-        "document.getElementById('idx-smvym').textContent='$'+v.toLocaleString('es-AR',{maximumFractionDigits:0});}"
-        "else{document.getElementById('smvym-val').textContent='Ver en MTSS';}"
-        "}).catch(()=>{document.getElementById('smvym-val').textContent='Ver en MTSS';});"
-        "function tickN(){var n=new Date(),pad=x=>x.toString().padStart(2,'0');"
+        "if(d.data&&d.data.length){var v=parseFloat(d.data[0][1]),f=function(n){return '$'+Math.round(n).toLocaleString('es-AR')};"
+        "var el=document.getElementById('smvym-val');if(el)el.textContent=f(v);"
+        "var el2=document.getElementById('idx-smvym');if(el2)el2.textContent=f(v);}"
+        "}).catch(()=>{});"
+        "function tickN(){var n=new Date(),pad=function(x){return x.toString().padStart(2,'0')};"
         "var dias=['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];"
-        "document.getElementById('nreloj').textContent=pad(n.getHours())+':'+pad(n.getMinutes())+':'+pad(n.getSeconds());"
-        "document.getElementById('nfecha').textContent=dias[n.getDay()]+' '+pad(n.getDate())+'/'+(pad(n.getMonth()+1))+'/'+n.getFullYear();}"
+        "var rj=document.getElementById('nreloj');var fh=document.getElementById('nfecha');"
+        "if(rj)rj.textContent=pad(n.getHours())+':'+pad(n.getMinutes())+':'+pad(n.getSeconds());"
+        "if(fh)fh.textContent=dias[n.getDay()]+' '+pad(n.getDate())+'/'+(pad(n.getMonth()+1))+'/'+n.getFullYear();}"
         "tickN();setInterval(tickN,1000);"
-        "function showTab(id,btn){document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));"
-        "document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));"
+        "function showTab(id,btn){"
+        "document.querySelectorAll('.tabpanel').forEach(function(p){p.classList.remove('on')});"
+        "document.querySelectorAll('.tab').forEach(function(b){b.classList.remove('on')});"
         "document.getElementById(id).classList.add('on');btn.classList.add('on');}"
         "</script>"
         "<style>@media(max-width:700px){.twocol{grid-template-columns:1fr!important}}</style>"
     )
+
     bna_bar = (
         '<div style="background:var(--card);border-radius:var(--r);padding:14px 20px;'
-        'box-shadow:var(--shadow);margin-bottom:20px;display:flex;align-items:center;'
-        'justify-content:space-between;flex-wrap:wrap;gap:12px">'
-        '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'
-        '<div><div style="font-size:.66rem;font-weight:700;color:var(--muted);'
-        'text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Dolar BNA Oficial</div>'
-        '<div style="display:flex;gap:12px;align-items:baseline">'
-        '<div><span style="font-size:.68rem;color:var(--muted)">Compra</span> '
-        '<span id="nc" style="font-weight:700;font-size:1.05rem;color:var(--success)">---</span></div>'
-        '<div><span style="font-size:.68rem;color:var(--muted)">Venta</span> '
-        '<span id="nv" style="font-weight:700;font-size:1.05rem;color:var(--danger)">---</span></div>'
+        'box-shadow:var(--shadow);margin-bottom:18px;display:flex;align-items:center;'
+        'justify-content:space-between;flex-wrap:wrap;gap:10px">'
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">'
+        '<div><div style="font-size:.62rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Dolar BNA Oficial</div>'
+        '<div style="display:flex;gap:14px;align-items:baseline">'
+        '<div><span style="font-size:.65rem;color:var(--muted)">Compra</span> '
+        '<span id="nc" style="font-weight:700;font-size:1.1rem;color:var(--success)">---</span></div>'
+        '<div><span style="font-size:.65rem;color:var(--muted)">Venta</span> '
+        '<span id="nv" style="font-weight:700;font-size:1.1rem;color:var(--danger)">---</span></div>'
+        '<div><span style="font-size:.65rem;color:var(--muted)">Divisa/Tarjeta</span> '
+        '<span id="nd" style="font-weight:700;font-size:1rem;color:var(--warning)">---</span></div>'
         '</div></div></div>'
         '<div style="text-align:right">'
-        '<div id="nreloj" style="font-size:1.2rem;color:var(--primary)"></div>'
+        '<div id="nreloj" style="font-family:serif;font-size:1.2rem;color:var(--primary);font-weight:600"></div>'
         '<div id="nfecha" style="font-size:.74rem;color:var(--muted)"></div>'
         '</div></div>'
     )
+
     tabs = (
         '<div class="tabs">'
         '<button class="tab on" onclick="showTab(\'t-imp\',this)">Impositivo</button>'
@@ -3685,55 +3696,95 @@ def novedades():
         '<button class="tab" onclick="showTab(\'t-yt\',this)">Holistor</button>'
         '</div>'
     )
+
     t_imp = (
         '<div id="t-imp" class="tabpanel on">'
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
-        '<div class="fcard" style="margin-bottom:0"><h3>ARCA / AFIP Novedades</h3>'
-        '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">'
-        '<a href="https://www.arca.gob.ar/noticias/" target="_blank" class="btn btn-o btn-sm">Noticias ARCA</a>'
-        '<a href="https://www.arca.gob.ar/vencimientos/" target="_blank" class="btn btn-arca btn-sm">Calendario Vencimientos ARCA</a>'
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px" class="twocol">'
+
+        '<div class="fcard" style="margin-bottom:0"><h3>ARCA / AFIP — Novedades</h3>'
+        '<div style="display:flex;flex-direction:column;gap:8px">'
+        '<a href="https://servicioscf.afip.gob.ar/publico/sitio/contenido/novedad/listado.aspx" target="_blank" class="btn btn-arca btn-sm">Novedades AFIP/ARCA (oficial)</a>'
+        '<a href="https://www.arca.gob.ar/vencimientos/" target="_blank" class="btn btn-o btn-sm">Calendario Vencimientos ARCA</a>'
         '<a href="https://www.argentina.gob.ar/trabajo/bo" target="_blank" class="btn btn-o btn-sm">Boletin Oficial</a>'
+        '<a href="https://contadoresenred.com/art-suma-fija-marzo-2026-nuevo-importe-respecto-del-regimen-general/" target="_blank" class="btn btn-o btn-sm">Contadores en Red — Novedades</a>'
+        '<a href="https://www.instagram.com/p/DVGNz5tDB6o/" target="_blank" class="btn btn-o btn-sm">Instagram novedades impositivas</a>'
+        '<a href="https://documento.errepar.com/actualidad/fondo-fiduciario-de-enfermedades-profesionales-nueva-suma-fija-con-vencimiento-en-mayo-2026-20260428091549513" target="_blank" class="btn btn-o btn-sm">Errepar — Fondo Enf. Profesionales</a>'
+        '<a href="https://siap.blogdelcontador.com.ar/novedades/nuevo-valor-de-la-suma-fija-del-fondo-fiduciario-de-enfermedades-profesionales-desde-marzo-2026/" target="_blank" class="btn btn-o btn-sm">Blog Contador — Suma fija FFEP</a>'
         '</div></div>'
+
         '<div class="fcard" style="margin-bottom:0"><h3>Links impositivos utiles</h3>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
         '<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-arca btn-sm">ARCA Login</a>'
         '<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do" target="_blank" class="btn btn-o btn-sm">Constancia Inscripcion</a>'
         '<a href="https://www.arca.gob.ar/monotributo/categorias.asp" target="_blank" class="btn btn-o btn-sm">Categorias Monotributo</a>'
         '<a href="http://dgronline.dgrsantiago.gob.ar" target="_blank" class="btn btn-o btn-sm">Rentas Santiago del Estero</a>'
+        '<a href="http://www.dgrsantiago.gov.ar/?page_id=992" target="_blank" class="btn btn-o btn-sm">Biblioteca IIBB Rentas SGO</a>'
+        '<a href="https://servicioscorp.anses.gob.ar/clavelogon/logon.aspx?system=miansesv2" target="_blank" class="btn btn-o btn-sm">ANSES</a>'
         '<a href="https://www.bcra.gob.ar" target="_blank" class="btn btn-b btn-sm">BCRA</a>'
+        '<a href="https://www.ilovepdf.com/es/jpg_a_pdf" target="_blank" class="btn btn-o btn-sm">iLovePDF</a>'
         '</div></div>'
+
         '</div>'
-        '<div class="fcard" style="margin-top:14px"><h3>CPCESE — Consejo Profesional</h3><div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px"><a href="https://cpcese.org.ar/matriculados/honorarios-minimos-eticos" target="_blank" class="btn btn-a btn-sm">Honorarios Minimos y Eticos CPCESE</a><a href="https://cpcese.org.ar/documentos/contadores%20afiche%2001-12-25.pdf" target="_blank" class="btn btn-o btn-sm">Ultima actualizacion honorarios (Dic 2025)</a><a href="https://autogestion.cpcese.org.ar/materiales" target="_blank" class="btn btn-o btn-sm">Cursos y materiales CPCESE</a></div></div><div class="fcard" style="margin-top:14px"><h3>Mercados e Inversiones</h3><div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px"><a href="https://www.rava.com/" target="_blank" class="btn btn-o btn-sm">RAVA — Bolsa y Mercado</a><a href="https://rofex.primary.ventures/fyo/futurosfinancieros" target="_blank" class="btn btn-o btn-sm">ROFEX — Futuros Financieros</a><a href="https://www.ambito.com/edicion-impresa/hacienda-carnes-y-la-factura-electronica-n3969539" target="_blank" class="btn btn-o btn-sm">Comprobante liquidacion hacienda</a></div></div><div class="fcard" style="margin-top:14px"><h3>Indices del dia</h3>'
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px" class="twocol">'
+
+        '<div class="fcard" style="margin-bottom:0"><h3>CPCESE — Honorarios y Cursos</h3>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://cpcese.org.ar/matriculados/honorarios-minimos-eticos" target="_blank" class="btn btn-a btn-sm">Honorarios Minimos Eticos</a>'
+        '<a href="https://cpcese.org.ar/documentos/contadores%20afiche%2001-12-25.pdf" target="_blank" class="btn btn-o btn-sm">Ultima actualizacion (Dic 2025)</a>'
+        '<a href="https://autogestion.cpcese.org.ar/materiales" target="_blank" class="btn btn-o btn-sm">Cursos y materiales CPCESE</a>'
+        '<a href="https://www.ambito.com/edicion-impresa/hacienda-carnes-y-la-factura-electronica-n3969539" target="_blank" class="btn btn-o btn-sm">Liquidaciones Hacienda</a>'
+        '</div></div>'
+
+        '<div class="fcard" style="margin-bottom:0"><h3>Mercados e Inversiones</h3>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.rava.com/" target="_blank" class="btn btn-o btn-sm">RAVA — Bolsa y Mercados</a>'
+        '<a href="https://rofex.primary.ventures/fyo/futurosfinancieros" target="_blank" class="btn btn-o btn-sm">ROFEX — Futuros Financieros</a>'
+        '</div></div>'
+
+        '</div>'
+
+        '<div class="fcard"><h3>Indices del dia</h3>'
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">'
         '<div class="scard" style="margin-bottom:0"><div class="slabel">Dolar Oficial</div><div class="sval" id="idx-oficial">---</div></div>'
         '<div class="scard b" style="margin-bottom:0"><div class="slabel">Dolar MEP</div><div class="sval" id="idx-mep">---</div></div>'
         '<div class="scard o" style="margin-bottom:0"><div class="slabel">Dolar Blue</div><div class="sval" id="idx-blue">---</div></div>'
         '<div class="scard g" style="margin-bottom:0"><div class="slabel">SMVYM</div><div class="sval" id="idx-smvym">---</div></div>'
         '</div></div>'
+
         '</div>'
     )
+
     t_sal = (
         '<div id="t-sal" class="tabpanel">'
         '<div class="warn-box" style="margin-bottom:14px">Las escalas se actualizan por paritaria. Verificar siempre en la fuente oficial antes de liquidar.</div>'
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
-        '<div class="fcard" style="margin-bottom:0"><h3>Transporte de Cargas (FADEEAC/Camioneros)</h3><div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 40/89</div><div style="display:flex;flex-direction:column;gap:7px"><a href="https://www.camioneros-ba.org.ar/index.php/gremiales/salarios/escalas-salariales" target="_blank" class="btn btn-o btn-sm">Escalas Camioneros/Transporte</a><a href="https://federacion.impresiondeboletas.com.ar/login.aspx" target="_blank" class="btn btn-o btn-sm">Sindicato Camioneros Nacional</a><a href="http://camioneros.sirwiq.com/Login/Acceso" target="_blank" class="btn btn-o btn-sm">Camioneros Sgo. del Estero</a>'
+
+        '<div class="fcard" style="margin-bottom:0"><h3>Transporte de Cargas (Camioneros/FADEEAC)</h3>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 40/89</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://www.camioneros-ba.org.ar/index.php/gremiales/salarios/escalas-salariales" target="_blank" class="btn btn-o btn-sm">Escala vigente FADEEAC</a>'
-        '<a href="https://www.argentina.gob.ar/trabajo/convenios" target="_blank" class="btn btn-o btn-sm">Convenios MTSS</a>'
+        '<a href="https://www.camioneros-ba.org.ar/index.php/gremiales/salarios/escalas-salariales" target="_blank" class="btn btn-o btn-sm">Escalas Camioneros/Transporte</a>'
+        '<a href="https://federacion.impresiondeboletas.com.ar/login.aspx" target="_blank" class="btn btn-o btn-sm">Sindicato Camioneros Nacional</a>'
+        '<a href="http://camioneros.sirwiq.com/Login/Acceso" target="_blank" class="btn btn-o btn-sm">Camioneros Sgo. del Estero</a>'
         '</div></div>'
-        '<div class="fcard" style="margin-bottom:0"><h3>Comercio — Emp. de Comercio (FAECYS)</h3>'
+
+        '<div class="fcard" style="margin-bottom:0"><h3>Empleados de Comercio (FAECYS)</h3>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 130/75</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://jorgevega.com.ar/laboral/71-empleados-comercio-escala-salarial-2016-2017.html" target="_blank" class="btn btn-o btn-sm">Escala FAECYS</a>'
-        '<a href="https://www.argentina.gob.ar/trabajo/escalasSalariales" target="_blank" class="btn btn-o btn-sm">Portal escalas MTSS</a>'
+        '<a href="https://jorgevega.com.ar/laboral/71-empleados-comercio-escala-salarial-2016-2017.html" target="_blank" class="btn btn-o btn-sm">Escalas Empleados Comercio</a>'
+        '<a href="https://www.online.faecys.org.ar/Inicio.aspx" target="_blank" class="btn btn-o btn-sm">FAECYS Nacional</a>'
+        '<a href="https://www.sasweb.com.ar/usuarios/login" target="_blank" class="btn btn-o btn-sm">Sindicato Comercio Sgo. Estero</a>'
         '</div></div>'
+
         '<div class="fcard" style="margin-bottom:0"><h3>Trabajadores Agropecuarios (UATRE)</h3>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Convenio 1/75 — Personal rural</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://www.ignacioonline.com.ar/paritaria-agrarios-escalas-salariales-marzo-abril-y-junio-2026-uatre/" target="_blank" class="btn btn-o btn-sm">UATRE oficial</a>'
-        '<a href="https://www.renatea.gob.ar" target="_blank" class="btn btn-o btn-sm">RENATEA</a>'
+        '<a href="https://www.ignacioonline.com.ar/paritaria-agrarios-escalas-salariales-marzo-abril-y-junio-2026-uatre/" target="_blank" class="btn btn-o btn-sm">Escalas Agropecuarios 2026 (UATRE)</a>'
+        '<a href="https://portal.renatre.org.ar/" target="_blank" class="btn btn-o btn-sm">RENATRE Nacional</a>'
+        '<a href="https://apps.uatre.org.ar/usupe/signin.aspx" target="_blank" class="btn btn-o btn-sm">UATRE Santiago del Estero</a>'
         '</div></div>'
+
         '<div class="fcard" style="margin-bottom:0"><h3>SMVyM — Salario Minimo</h3>'
         '<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Fijado por el CNEPSMVYM</div>'
         '<div id="smvym-box" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:10px">'
@@ -3742,55 +3793,74 @@ def novedades():
         '</div>'
         '<a href="https://www.argentina.gob.ar/trabajo/smvm" target="_blank" class="btn btn-g btn-sm">Ver SMVYM oficial</a>'
         '</div>'
+
         '</div></div>'
     )
+
     t_srt = (
         '<div id="t-srt" class="tabpanel">'
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">'
-        '<div class="fcard" style="margin-bottom:0"><h3>SRT — Monto fijo y actualizaciones</h3>'
-        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:12px">Actualizacion trimestral. Verificar monto vigente antes de liquidar.</div>'
+
+        '<div class="fcard" style="margin-bottom:0"><h3>SRT — Suma fija y actualizaciones</h3>'
+        '<div style="font-size:.8rem;color:var(--muted);margin-bottom:12px">Actualizacion trimestral por resolucion SRT. Verificar monto vigente antes de liquidar.</div>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
         '<a href="https://www.srt.gob.ar" target="_blank" class="btn btn-o btn-sm">SRT Oficial</a>'
-        '<a href="https://www.srt.gob.ar/index.shtml/montosfijos" target="_blank" class="btn btn-o btn-sm">Montos fijos vigentes</a>'
+        '<a href="https://www.srt.gob.ar/index.shtml/montosfijos" target="_blank" class="btn btn-o btn-sm">Montos fijos vigentes SRT</a>'
+        '<a href="https://siap.blogdelcontador.com.ar/novedades/nuevo-valor-de-la-suma-fija-del-fondo-fiduciario-de-enfermedades-profesionales-desde-marzo-2026/" target="_blank" class="btn btn-o btn-sm">Nueva suma fija FFEP (Mar 2026)</a>'
+        '<a href="https://documento.errepar.com/actualidad/fondo-fiduciario-de-enfermedades-profesionales-nueva-suma-fija-con-vencimiento-en-mayo-2026-20260428091549513" target="_blank" class="btn btn-o btn-sm">FFEP — Vencimiento Mayo 2026</a>'
         '<a href="https://servicios.srt.gob.ar/srt/emision/index.xhtml" target="_blank" class="btn btn-o btn-sm">Sistema SRT Emision</a>'
         '<a href="https://www.srt.gob.ar/index.shtml/siniestros" target="_blank" class="btn btn-o btn-sm">Denuncia Siniestros</a>'
         '</div></div>'
+
         '<div class="fcard" style="margin-bottom:0"><h3>Higiene y Seguridad Laboral</h3>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
         '<a href="https://www.argentina.gob.ar/trabajo/seguridadysalud" target="_blank" class="btn btn-b btn-sm">Seguridad e Higiene MTSS</a>'
         '<a href="https://www.srt.gob.ar/estadisticas/" target="_blank" class="btn btn-o btn-sm">Estadisticas SRT</a>'
         '<a href="https://www.argentina.gob.ar/trabajo" target="_blank" class="btn btn-o btn-sm">Ministerio de Trabajo</a>'
+        '<a href="https://contadoresenred.com/art-suma-fija-marzo-2026-nuevo-importe-respecto-del-regimen-general/" target="_blank" class="btn btn-o btn-sm">ART — Suma fija vigente</a>'
         '</div></div>'
+
         '</div></div>'
     )
+
     t_yt = (
         '<div id="t-yt" class="tabpanel">'
         '<div class="fcard">'
-        '<h3>Canal Holistor — Tutoriales y novedades</h3>'
-        '<p style="color:var(--muted);font-size:.83rem;margin-bottom:16px">Videos de capacitacion, tutoriales del programa Holistor y novedades impositivas.</p>'
-        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:16px">'
+        '<h3>Canal Holistor — Tutoriales y novedades del sistema</h3>'
+        '<p style="color:var(--muted);font-size:.83rem;margin-bottom:16px">Videos oficiales de capacitacion, liquidacion de sueldos y novedades impositivas.</p>'
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:14px">'
+
         '<div style="background:var(--bg);border-radius:10px;padding:16px">'
-        '<div style="font-weight:700;color:var(--primary);margin-bottom:8px;font-size:1rem">Canal Holistor</div>'
+        '<div style="font-weight:700;color:var(--primary);margin-bottom:8px;font-size:1rem">Canal oficial Holistor</div>'
         '<p style="font-size:.83rem;color:var(--muted);margin-bottom:14px;line-height:1.6">'
-        'Tutoriales de liquidacion de sueldos, manejo del sistema, novedades impositivas '
-        'y actualizaciones para estudios contables.</p>'
+        'Tutoriales de liquidacion de sueldos, manejo del sistema Holistor, '
+        'novedades impositivas y actualizaciones para estudios contables.</p>'
         '<a href="https://www.youtube.com/@HolistorSA/videos" target="_blank" '
-        'class="btn btn-sm" style="background:#FF0000;color:#fff;width:100%;justify-content:center;display:flex">'
+        'class="btn btn-sm" style="background:#FF0000;color:#fff;width:100%;justify-content:center;display:flex;margin-bottom:8px">'
         'Ver canal completo en YouTube</a>'
+        '<a href="https://www.youtube.com/@HolistorSA/videos" target="_blank" class="btn btn-o btn-sm" style="width:100%;justify-content:center;display:flex">'
+        'Ultimos videos subidos</a>'
         '</div>'
+
         '<div style="background:var(--bg);border-radius:10px;padding:16px">'
-        '<div style="font-weight:700;color:var(--primary);margin-bottom:8px">Como buscar videos</div>'
-        '<div class="info-box">Busca en YouTube: <b>Holistor liquidacion</b>, <b>Holistor sueldos</b>, <b>Holistor AFIP</b></div>'
-        '<div style="margin-top:10px;display:flex;flex-direction:column;gap:7px">'
-        '<a href="https://www.youtube.com/results?search_query=holistor+liquidacion+sueldos" target="_blank" class="btn btn-o btn-sm">Buscar: liquidacion sueldos</a>'
-        '<a href="https://www.youtube.com/results?search_query=holistor+novedades+impositivas" target="_blank" class="btn btn-o btn-sm">Buscar: novedades impositivas</a>'
-        '<a href="https://www.youtube.com/results?search_query=holistor+tutorial" target="_blank" class="btn btn-o btn-sm">Buscar: tutoriales</a>'
+        '<div style="font-weight:700;color:var(--primary);margin-bottom:8px">Buscar videos por tema</div>'
+        '<div class="info-box" style="margin-bottom:10px">Busca en YouTube escribiendo el tema + HolistorSA</div>'
+        '<div style="display:flex;flex-direction:column;gap:7px">'
+        '<a href="https://www.youtube.com/results?search_query=HolistorSA+liquidacion+sueldos" target="_blank" class="btn btn-o btn-sm">Liquidacion de sueldos</a>'
+        '<a href="https://www.youtube.com/results?search_query=HolistorSA+novedades+impositivas" target="_blank" class="btn btn-o btn-sm">Novedades impositivas</a>'
+        '<a href="https://www.youtube.com/results?search_query=HolistorSA+tutorial" target="_blank" class="btn btn-o btn-sm">Tutoriales del sistema</a>'
+        '<a href="https://www.youtube.com/results?search_query=HolistorSA+ART+SRT" target="_blank" class="btn btn-o btn-sm">ART / SRT</a>'
         '</div></div>'
+
         '</div></div></div>'
     )
-    body = bna_bar + tabs + t_imp + t_sal + t_srt + t_yt + dolar_script
-    return page("Novedades", body, "Novedades")
 
+    body = (
+        '<h1 class="page-title">Novedades</h1>'
+        '<p class="page-sub">Actualizaciones impositivas, escalas salariales y capacitaciones</p>'
+        + bna_bar + tabs + t_imp + t_sal + t_srt + t_yt + script
+    )
+    return page("Novedades", body, "Novedades")
 
 
 @app.route("/api/cierres_por_mes")
