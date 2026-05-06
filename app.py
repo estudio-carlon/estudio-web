@@ -2212,9 +2212,9 @@ def cuenta(id):
     </div></div>
 
     <script>
-    var _waTel = "{telefono}";
-    var _waNom = "{nombre.replace(chr(34),"").replace(chr(39),"")}";
-    var _waCuit = "{cuit or ""}";
+    var _waTel = {json.dumps(telefono or "")};
+    var _waNom = {json.dumps(nombre or "")};
+    var _waCuit = {json.dumps(cuit or "")};
 
     function abrirPago(p,s){{
       document.getElementById('mp-sub').textContent=p+' · Saldo: $'+Math.round(s).toLocaleString('es-AR');
