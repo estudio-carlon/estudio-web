@@ -1754,142 +1754,171 @@ def wa_masivo():
 @login_req
 def wa_facturas_preview():
     conn=conectar();c=conn.cursor()
-    # Tipo: facturas (recordatorio compras) o cobro (recordatorio pago)
     tipo = request.args.get("tipo","facturas")
-    c.execute("""SELECT id,nombre,telefono,condicion_fiscal,actividad,abono
-                 FROM clientes WHERE telefono IS NOT NULL AND telefono != ''
-                 ORDER BY nombre""")
-    todos=c.fetchall()
-    # Para facturas: solo los que tienen WA activo
-    # Para cobro: todos los que tienen deuda
-    if tipo=="facturas":
-        c.execute("""SELECT id FROM clientes WHERE envio_wa_facturas=TRUE""")
-        ids_wa={r[0] for r in c.fetchall()}
-        data=[d for d in todos if d[0] in ids_wa]
-    else:
-        c.execute("""SELECT cl.id,SUM(cu.debe-cu.haber) d FROM cuentas cu
-                     JOIN clientes cl ON cl.id=cu.cliente_id
-                     GROUP BY cl.id HAVING SUM(cu.debe-cu.haber)>0""")
-        ids_deuda={r[0]:r[1] for r in c.fetchall()}
-        data=[d for d in todos if d[0] in ids_deuda]
-    conn.close()
-
     hoy=datetime.now()
-    mes_nombre=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto",
-                "Septiembre","Octubre","Noviembre","Diciembre"][hoy.month]
+    mes_nombre=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio",
+                "Agosto","Septiembre","Octubre","Noviembre","Diciembre"][hoy.month]
+    periodo_actual=hoy.strftime("%m/%Y")
+
+    # Cargar todos con telefono
+    c.execute("""SELECT cl.id,cl.nombre,cl.telefono,cl.condicion_fiscal,cl.actividad,cl.abono,
+                        cl.envio_wa_facturas,cl.responsable_inscripto,
+                        COALESCE(SUM(cu.debe-cu.haber),0) saldo
+                 FROM clientes cl
+                 LEFT JOIN cuentas cu ON cu.cliente_id=cl.id
+                 WHERE cl.telefono IS NOT NULL AND cl.telefono != ''
+                 GROUP BY cl.id,cl.nombre,cl.telefono,cl.condicion_fiscal,cl.actividad,
+                          cl.abono,cl.envio_wa_facturas,cl.responsable_inscripto
+                 ORDER BY cl.nombre""")
+    todos=c.fetchall(); conn.close()
+
+    # Filtrar segun tipo
+    if tipo=="facturas":
+        # Responsables inscriptos o con WA de facturas activo
+        data=[d for d in todos if d[7] or d[6]]
+    elif tipo=="cobro":
+        data=[d for d in todos if d[8]>0]
+    else:
+        data=todos
+
+    # Mensajes por defecto
+    MSG_FACTURAS=(
+        "Estimado/a {nombre}, le recordamos que se acerca el vencimiento de su Declaracion Jurada.\n\n"
+        "Para poder presentarla correctamente y cumplir en tiempo y forma con los plazos impositivos, "
+        "le solicitamos que nos haga llegar a la brevedad sus *facturas de compras de {mes}*.\n\n"
+        "Esto nos permite registrar correctamente sus creditos fiscales y evitar atrasos en las "
+        "presentaciones ante ARCA/AFIP.\n\n"
+        "Puede enviarnos las facturas por este WhatsApp, por mail o acercarse al estudio.\n\n"
+        "Quedamos a su disposicion. Muchas gracias!\n"
+        "— *Estudio Contable Carlon*"
+    )
+    MSG_COBRO=(
+        "Estimado/a {nombre}, le recordamos que registra un saldo pendiente de *{saldo}* "
+        "en concepto de honorarios profesionales correspondientes al periodo {periodo}.\n\n"
+        "Le pedimos que regularice su situacion a la brevedad para poder continuar "
+        "con la gestion de sus presentaciones impositivas sin inconvenientes.\n\n"
+        "En caso de transferencia:\n"
+        "Alias: *estudio.conta.carlon*\n"
+        "Titular: Natasha Alexis Carlon\n"
+        "CBU: 0110420630042013452529\n\n"
+        "Puede solicitar el detalle de la deuda por este medio o acercarse al estudio.\n"
+        "— *Estudio Contable Carlon*"
+    )
+
     flash=""
+    if request.method=="POST":
+        accion=request.form.get("accion","")
+        seleccionados=request.form.getlist("sel")
+        mensaje_custom=request.form.get("mensaje_custom","").strip()
 
-    if request.method=="POST" and request.form.get("accion")=="enviar_todos":
-        if not CALLMEBOT_APIKEY:
-            flash='<div class="flash ferr">⚠️ No está configurada la clave CallMeBot. Configurala en las variables de entorno de Render.</div>'
-        else:
-            enviados=0;errores=[]
-            for d in data:
-                cid,nombre,tel_enc,condicion,actividad,abono=d
-                tel_d=(dec(tel_enc) or "").replace(" ","").replace("-","").replace("+","").strip()
-                if not tel_d: continue
-                num=f"54{tel_d}" if not tel_d.startswith("54") else tel_d
-                nombre_c=nombre.split()[0] if nombre else "estimado/a"
-                if tipo=="facturas":
-                    msg=(f"Hola {nombre_c}! 👋\n\n"
-                         f"Le recordamos que estamos a fin de {mes_nombre}. 📅\n\n"
-                         f"📂 *Por favor envienos sus facturas de compras* para poder "
-                         f"realizar correctamente su declaración impositiva.\n\n"
-                         f"Puede enviarnos las facturas por este WhatsApp o al mail del estudio.\n\n"
-                         f"Muchas gracias! 🙏\n— *Estudio Contable Carlon*")
-                else:
-                    saldo=ids_deuda.get(cid,0)
-                    msg=(f"Hola {nombre_c}! 👋\n\n"
-                         f"Le informamos que registra un saldo pendiente de *{fmt(saldo)}* "
-                         f"en concepto de honorarios profesionales.\n\n"
-                         f"Para regularizar puede transferir a:\n"
-                         f"🏦 Banco Nación\n"
-                         f"CBU: 0110420630042013452529\n"
-                         f"Alias: ESTUDIO.CONTA.CARLON\n"
-                         f"Titular: Alexis Natasha Carlon\n\n"
-                         f"Ante cualquier consulta estamos a su disposición.\n"
-                         f"— *Estudio Contable Carlon*")
-                try:
-                    url=f"https://api.callmebot.com/whatsapp.php?phone={num}&text={urllib.parse.quote(msg)}&apikey={CALLMEBOT_APIKEY}"
-                    req2=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
-                    urllib.request.urlopen(req2,timeout=6)
-                    enviados+=1; time.sleep(0.6)
-                except Exception as ex:
-                    errores.append(nombre)
-            tipo_lbl="Recordatorio facturas" if tipo=="facturas" else "Recordatorio cobro"
-            registrar_auditoria("WA_MASIVO",f"{tipo_lbl} {mes_nombre}: {enviados} enviados")
-            err_txt=f" · Errores: {', '.join(errores[:5])}" if errores else ""
-            flash=f'<div class="flash fok">✅ {enviados} mensajes enviados{err_txt}</div>'
+        if accion in ("enviar_seleccionados","enviar_todos") and (seleccionados or accion=="enviar_todos"):
+            if not CALLMEBOT_APIKEY:
+                flash='<div class="flash ferr">Configura CALLMEBOT_APIKEY en Render para envio automatico. Usa WA manual por cliente.</div>'
+            else:
+                ids_sel={int(x) for x in seleccionados} if accion=="enviar_seleccionados" else {d[0] for d in data}
+                enviados=0; errores=[]
+                for d in data:
+                    cid,nombre,tel_enc,condicion,actividad,abono,wa_f,ri,saldo=d
+                    if cid not in ids_sel: continue
+                    tel_d=(dec(tel_enc) or "").replace(" ","").replace("-","").replace("+","").strip()
+                    if not tel_d: continue
+                    num=f"54{tel_d}" if not tel_d.startswith("54") else tel_d
+                    nombre_c=nombre.split()[0] if nombre else "cliente"
+                    if mensaje_custom:
+                        msg=f"Estimado/a {nombre_c},\n\n"+mensaje_custom
+                    elif tipo=="facturas":
+                        msg=MSG_FACTURAS.replace("{nombre}",nombre_c).replace("{mes}",mes_nombre)
+                    else:
+                        msg=MSG_COBRO.replace("{nombre}",nombre_c).replace("{saldo}",fmt(saldo)).replace("{periodo}",periodo_actual)
+                    try:
+                        url=f"https://api.callmebot.com/whatsapp.php?phone={num}&text={urllib.parse.quote(msg)}&apikey={CALLMEBOT_APIKEY}"
+                        req2=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
+                        urllib.request.urlopen(req2,timeout=6)
+                        enviados+=1; time.sleep(0.6)
+                    except: errores.append(nombre)
+                registrar_auditoria("WA_MASIVO",f"Tipo:{tipo} {mes_nombre}: {enviados} enviados")
+                err_txt=(f" · Errores: {', '.join(errores[:4])}" if errores else "")
+                flash=f'<div class="flash fok">✅ {enviados} mensajes enviados{err_txt}</div>'
 
-    # Build preview cards
+    # Build client list with checkboxes
     filas=""
     for d in data:
-        cid,nombre,tel_enc,condicion,actividad,abono=d
+        cid,nombre,tel_enc,condicion,actividad,abono,wa_f,ri,saldo=d
         tel_d=dec(tel_enc) if tel_enc else "---"
         tel_limpio=(tel_d or "").replace(" ","").replace("-","")
-        nombre_c=nombre.split()[0] if nombre else "estimado/a"
-        saldo=ids_deuda.get(cid,0) if tipo=="cobro" else 0
-
+        nombre_c=nombre.split()[0] if nombre else "cliente"
+        # Default message for manual WA
         if tipo=="facturas":
-            msg_prev=(f"Hola {nombre_c}! 👋 Le recordamos que estamos a fin de {mes_nombre}. "
-                      f"Por favor envienos sus facturas de compras para la declaración impositiva. "
-                      f"Muchas gracias! — Estudio Contable Carlon")
+            msg_prev=MSG_FACTURAS.replace("{nombre}",nombre_c).replace("{mes}",mes_nombre).replace("\n","\n")
         else:
-            msg_prev=(f"Hola {nombre_c}! Registra saldo pendiente de {fmt(saldo)} por honorarios. "
-                      f"Puede transferir al CBU 0110420630042013452529 Alias ESTUDIO.CONTA.CARLON. "
-                      f"Muchas gracias! — Estudio Contable Carlon")
-
+            msg_prev=MSG_COBRO.replace("{nombre}",nombre_c).replace("{saldo}",fmt(saldo)).replace("{periodo}",periodo_actual).replace("\n","\n")
         wa_link=(f"https://wa.me/54{tel_limpio}?text={urllib.parse.quote(msg_prev)}"
                  if tel_limpio and tel_d!="---" else "#")
-
-        saldo_badge=f'<span style="color:var(--danger);font-weight:700">{fmt(saldo)}</span>' if saldo>0 else ""
-        filas+=f'''<div class="arow">
-          <div>
-            <span style="font-weight:600;color:var(--primary)">{nombre}</span>
-            {saldo_badge}
-            <span class="bmedio" style="margin-left:4px">{condicion or "---"}</span><br>
-            <span style="font-size:.75rem;color:var(--muted)">📱 {tel_d}</span>
+        # badges
+        cond_col={"Responsable Inscripto":"#185FA5","Monotributista":"#1D9E75"}.get(condicion or "","#888")
+        cond_b=f'<span style="font-size:.67rem;background:#f0f4ff;color:{cond_col};padding:2px 6px;border-radius:6px;font-weight:700">{condicion or "---"}</span>'
+        saldo_b=(f'<span style="color:var(--danger);font-size:.75rem;font-weight:700"> · Debe: {fmt(saldo)}</span>' if saldo>0 else "")
+        # checkbox - pre-checked by default
+        filas+=(f'''<div class="arow" style="align-items:center">
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="checkbox" name="sel" value="{cid}" id="c{cid}" checked
+              style="width:18px;height:18px;cursor:pointer;accent-color:var(--primary)">
+            <label for="c{cid}" style="cursor:pointer">
+              <span style="font-weight:600;color:var(--primary)">{nombre}</span>
+              {cond_b}{saldo_b}<br>
+              <span style="font-size:.73rem;color:var(--muted)">📱 {tel_d}</span>
+            </label>
           </div>
-          <a href="{wa_link}" target="_blank" class="btn btn-wa btn-sm">📱 Enviar</a>
-        </div>'''
+          <a href="{wa_link}" target="_blank" class="btn btn-wa btn-xs">📱 WA manual</a>
+        </div>''')
 
-    tipo_lbl = "Recordatorio Facturas de Compras" if tipo=="facturas" else "Recordatorio de Cobro"
-    tipo_desc = (f"Clientes con WhatsApp habilitado — {mes_nombre} {hoy.year}"
-                 if tipo=="facturas" else "Clientes con saldo pendiente")
-    msg_ejemplo = (f"Hola [Nombre]! Le recordamos que estamos a fin de {mes_nombre}. Por favor envienos sus facturas de compras para la declaración impositiva. — Estudio Contable Carlon"
-                   if tipo=="facturas" else
-                   f"Hola [Nombre]! Registra saldo pendiente de $X por honorarios. Puede transferir al CBU 0110420630042013452529 Alias ESTUDIO.CONTA.CARLON. — Estudio Contable Carlon")
+    # Tab titles
+    tabs=('<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">'          +f'<a href="/wa_facturas_preview?tipo=facturas" class="btn {"btn-wa" if tipo=="facturas" else "btn-o"} btn-sm">📂 Facturas Compras (RI)</a>'          +f'<a href="/wa_facturas_preview?tipo=cobro" class="btn {"btn-wa" if tipo=="cobro" else "btn-o"} btn-sm">💰 Cobro Honorarios</a>'          +'<a href="/wa_masivo" class="btn btn-o btn-sm">📋 Mensaje General</a>'          +'</div>')
 
-    btn_masivo=""
-    if CALLMEBOT_APIKEY and data:
-        btn_masivo=f'''<div class="fcard" style="margin-bottom:16px">
-          <h3>Enviar a todos ({len(data)} clientes)</h3>
-          <form method="post">
-            <input type="hidden" name="accion" value="enviar_todos">
-            <button class="btn btn-wa" onclick="return confirm('¿Enviar WhatsApp a {len(data)} clientes?')">
-              📱 Enviar a TODOS ({len(data)})
-            </button>
-          </form>
-        </div>'''
-    elif not CALLMEBOT_APIKEY:
-        btn_masivo='<div class="warn-box">⚠️ Para el envío masivo automático configurá <b>CALLMEBOT_APIKEY</b> en Render. El envío manual (botón por cliente) funciona siempre.</div>'
+    tipo_titulo={"facturas":"📂 Recordatorio Facturas de Compras","cobro":"💰 Recordatorio de Cobro Honorarios"}.get(tipo,"📱 WhatsApp")
+    msg_defecto=(MSG_FACTURAS.replace("{nombre}","[Nombre]").replace("{mes}",mes_nombre)
+                 if tipo=="facturas" else
+                 MSG_COBRO.replace("{nombre}","[Nombre]").replace("{saldo}","$XXX").replace("{periodo}",periodo_actual))
+
+    no_data_msg=('<div class="warn-box">⚠️ No hay clientes para este mensaje. '                 +("Habilitá el envío de WA en la ficha de cada cliente Responsable Inscripto." if tipo=="facturas"
+                   else "No hay clientes con deuda pendiente.")                 +'</div>' if not data else "")
 
     body=f"""
-    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">← Volver a Clientes</a>
-    <h1 class="page-title">📱 {tipo_lbl}</h1>
-    <p class="page-sub">{tipo_desc}</p>
+    <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:14px">← Volver</a>
+    <h1 class="page-title">{tipo_titulo}</h1>
+    <p class="page-sub">{mes_nombre} {hoy.year} · {len(data)} clientes</p>
     {flash}
-    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      <a href="/wa_facturas_preview?tipo=facturas" class="btn {"btn-wa" if tipo=="facturas" else "btn-o"} btn-sm">📂 Facturas de compras</a>
-      <a href="/wa_facturas_preview?tipo=cobro" class="btn {"btn-wa" if tipo=="cobro" else "btn-o"} btn-sm">💰 Cobro honorarios</a>
-    </div>
-    <div class="info-box" style="margin-bottom:14px">
-      <b>Mensaje:</b> <i>"{msg_ejemplo}"</i>
-    </div>
-    {"<div class=warn-box>⚠️ No hay clientes para este tipo de mensaje.</div>" if not data else ""}
-    {btn_masivo}
-    {filas}"""
+    {tabs}
+    {no_data_msg}
+    <form method="post">
+      <input type="hidden" name="accion" value="enviar_seleccionados">
+      <div class="fcard" style="margin-bottom:14px">
+        <h3>✏️ Mensaje (editable — dejar vacío para usar el predeterminado)</h3>
+        <div style="background:#f0f9f4;border:1px solid #b7dfcc;border-radius:8px;padding:10px 14px;font-size:.8rem;color:#1a5c3a;margin-bottom:10px;white-space:pre-line">{msg_defecto}</div>
+        <div class="fg">
+          <label>Personalizar mensaje (opcional — si escribís acá reemplaza el predeterminado)</label>
+          <textarea name="mensaje_custom" rows="4" placeholder="Dejá vacío para usar el mensaje de arriba..."
+            style="padding:9px;border:1.5px solid var(--border);border-radius:8px;font-family:'DM Sans',sans-serif;
+            font-size:.85rem;width:100%;resize:vertical;outline:none;background:var(--bg);line-height:1.55"></textarea>
+        </div>
+      </div>
+      <div class="fcard" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <h3 style="margin-bottom:0">Seleccionar destinatarios</h3>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            <button type="button" onclick="document.querySelectorAll('input[name=sel]').forEach(c=>c.checked=true)" class="btn btn-o btn-sm">✓ Todos</button>
+            <button type="button" onclick="document.querySelectorAll('input[name=sel]').forEach(c=>c.checked=false)" class="btn btn-o btn-sm">✗ Ninguno</button>
+          </div>
+        </div>
+        {filas}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button type="submit" class="btn btn-wa">📱 Enviar a seleccionados (automático)</button>
+      </div>
+      {"<div class=warn-box style=margin-top:12px>⚠️ Para envio masivo automático configurá CALLMEBOT_APIKEY en Render. El botón WA manual siempre funciona.</div>" if not CALLMEBOT_APIKEY else ""}
+    </form>"""
     return page("WhatsApp", body, "Clientes")
+
 
 @app.route("/borrar_cliente/<int:id>")
 @admin_req
