@@ -1638,6 +1638,25 @@ def configuracion():
       document.getElementById('me').classList.add('on');
       setTimeout(()=>document.getElementById('me-display').focus(),100);
     }}
+    function selRango(){{
+      var desde=document.getElementById('per-desde').value;
+      var hasta=document.getElementById('per-hasta').value;
+      if(!desde||!hasta){{alert('Ingresá desde y hasta');return;}}
+      var d=new Date(desde+'-01'), h=new Date(hasta+'-01');
+      document.querySelectorAll('#periodos-check input[name=periodos_sel]').forEach(function(chk){{
+        var p=chk.value;  // formato MM/YYYY
+        var parr=p.split('/');var pm=parseInt(parr[0]);var py=parseInt(parr[1]);
+        var pdate=new Date(py,pm-1,1);
+        chk.checked = pdate>=d && pdate<=h;
+        chk.closest('label').style.background=chk.checked?'#d5f5e3':'var(--bg)';
+      }});
+    }}
+    // Update label color on checkbox change
+    document.addEventListener('change',function(e){{
+      if(e.target.name==='periodos_sel'){{
+        e.target.closest('label').style.background=e.target.checked?'#d5f5e3':'var(--bg)';
+      }}
+    }});
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
     // Validar que las claves coincidan en tiempo real
@@ -1868,6 +1887,25 @@ def clientes():
     <script>
     function filt(q){{q=q.toLowerCase();document.querySelectorAll('#tb tr').forEach(r=>r.style.display=r.dataset.search.includes(q)?'':'none')}}
     function confBorrar(id,nm,e){{e.preventDefault();document.getElementById('mb-nm').textContent=nm;document.getElementById('mb-ok').href='/borrar_cliente/'+id;document.getElementById('mb').classList.add('on')}}
+    function selRango(){{
+      var desde=document.getElementById('per-desde').value;
+      var hasta=document.getElementById('per-hasta').value;
+      if(!desde||!hasta){{alert('Ingresá desde y hasta');return;}}
+      var d=new Date(desde+'-01'), h=new Date(hasta+'-01');
+      document.querySelectorAll('#periodos-check input[name=periodos_sel]').forEach(function(chk){{
+        var p=chk.value;  // formato MM/YYYY
+        var parr=p.split('/');var pm=parseInt(parr[0]);var py=parseInt(parr[1]);
+        var pdate=new Date(py,pm-1,1);
+        chk.checked = pdate>=d && pdate<=h;
+        chk.closest('label').style.background=chk.checked?'#d5f5e3':'var(--bg)';
+      }});
+    }}
+    // Update label color on checkbox change
+    document.addEventListener('change',function(e){{
+      if(e.target.name==='periodos_sel'){{
+        e.target.closest('label').style.background=e.target.checked?'#d5f5e3':'var(--bg)';
+      }}
+    }});
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
     var waChk=document.getElementById('wa-chk');if(waChk)waChk.addEventListener('change',function(){{document.getElementById('wa-hint').style.display=this.checked?'block':'none'}})
@@ -2499,11 +2537,39 @@ def cuenta(id):
     medios_opts3=medios_opts
     # Periodos con deuda para selector multiple
     periodos_deudores=[d[0] for d in datos if d[1]-d[2]>0.5]
+    # Generate last 24 months for manual selection
+    from datetime import datetime as _dt
+    _hoy=_dt.now()
+    ultimos_meses=[]
+    for _m in range(24):
+        _mes=(_hoy.month - _m - 1) % 12 + 1
+        _anio=_hoy.year - ((_hoy.month - _m - 1) // 12 + (1 if _hoy.month-_m-1 < 0 else 0))
+        ultimos_meses.append(f"{_mes:02d}/{_anio}")
+    # Show periods with debt first (checked), then unchecked months
+    periodos_set=set(periodos_deudores)
     periodos_deudores_html="".join(
-        f'<label style="display:flex;align-items:center;gap:4px;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:.82rem">'
-        f'<input type="checkbox" name="periodos_sel" value="{p}" style="width:auto">{p}</label>'
-        for p in periodos_deudores
-    ) or '<span style="color:var(--muted);font-size:.82rem">Sin períodos con deuda pendiente</span>'
+        '<label style="display:flex;align-items:center;gap:4px;background:'
+        +("var(--bg);border:2px solid var(--danger)" if p in periodos_set else "var(--bg);border:1.5px solid var(--border)")
+        +';border-radius:6px;padding:4px 8px;cursor:pointer;font-size:.82rem">'
+        +'<input type="checkbox" name="periodos_sel" value="'+p+'"'
+        +(' checked' if p in periodos_set else '')
+        +' style="width:auto">'+p+'</label>'
+        for p in ultimos_meses
+    )
+    # Also allow manual period range input
+    periodos_deudores_html = (
+        '<div style="margin-bottom:10px">'
+        +'<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center">'
+        +'<span style="font-size:.78rem;font-weight:600;color:var(--muted)">Desde:</span>'
+        +'<input id="per-desde" type="month" style="font-size:.82rem;padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;width:130px">'
+        +'<span style="font-size:.78rem;font-weight:600;color:var(--muted)">Hasta:</span>'
+        +'<input id="per-hasta" type="month" style="font-size:.82rem;padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;width:130px">'
+        +'<button type="button" onclick="selRango()" class="btn btn-xs btn-p">Seleccionar rango</button>'
+        +'</div>'
+        +'<div id="periodos-check" style="display:flex;flex-wrap:wrap;gap:5px">'
+        +periodos_deudores_html
+        +'</div></div>'
+    )
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Clientes</a>
     <h1 class="page-title">{nombre}</h1>
@@ -2548,7 +2614,7 @@ def cuenta(id):
               <div class="info-box" style="margin-bottom:10px;font-size:.79rem">Seleccioná los períodos que incluye este pago. El monto se divide proporcionalmente.</div>
               <div class="fg" style="margin-bottom:10px">
                 <label>Periodos a incluir (seleccioná los que corresponden)</label>
-                <div id="periodos-check" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+                <div style="margin-top:6px">
                   {periodos_deudores_html}
                 </div>
               </div>
@@ -2775,6 +2841,25 @@ def cuenta(id):
       }}
     }});
 
+    function selRango(){{
+      var desde=document.getElementById('per-desde').value;
+      var hasta=document.getElementById('per-hasta').value;
+      if(!desde||!hasta){{alert('Ingresá desde y hasta');return;}}
+      var d=new Date(desde+'-01'), h=new Date(hasta+'-01');
+      document.querySelectorAll('#periodos-check input[name=periodos_sel]').forEach(function(chk){{
+        var p=chk.value;  // formato MM/YYYY
+        var parr=p.split('/');var pm=parseInt(parr[0]);var py=parseInt(parr[1]);
+        var pdate=new Date(py,pm-1,1);
+        chk.checked = pdate>=d && pdate<=h;
+        chk.closest('label').style.background=chk.checked?'#d5f5e3':'var(--bg)';
+      }});
+    }}
+    // Update label color on checkbox change
+    document.addEventListener('change',function(e){{
+      if(e.target.name==='periodos_sel'){{
+        e.target.closest('label').style.background=e.target.checked?'#d5f5e3':'var(--bg)';
+      }}
+    }});
     function closeM(id){{document.getElementById(id).classList.remove('on')}}
     document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}))
     </script>
