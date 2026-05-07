@@ -2515,9 +2515,14 @@ def cuenta(id):
                  +'class="btn btn-xs btn-b" title="Enviar recibo por email">✉️ Email</a>')
         else:
             bem=''
-        filas+=('<div class="arow">'
+        monto_fila=d[2] if d[2]>0 else d[1]
+        filas+=('<div class="arow" style="position:relative">'
+               +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer">'
+               +'<input type="checkbox" class="per-chk" data-per="'+per_esc+'" data-monto="'+str(round(monto_fila or 0))+'"'
+               +' style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer">'
+               +'</label>'
                +'<span class="period">'+d[0]+'</span>'
-               +'<span style="font-size:.86rem">'+fmt(d[2] if d[2]>0 else d[1])+'</span>'
+               +'<span style="font-size:.86rem">'+fmt(monto_fila)+'</span>'
                +badge
                +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
                +'<a href="/recibo/'+str(id)+'/'+per_esc+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
@@ -2594,8 +2599,24 @@ def cuenta(id):
       <div class="scard r"><div class="slabel">Deuda Pendiente</div><div class="sval">{fmt(total_deuda)}</div></div>
     </div>
     {flash}
+    <div id="sel-bar" style="display:none;background:var(--primary);color:#fff;border-radius:var(--r);padding:12px 18px;margin-bottom:12px;display:none;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <span id="sel-info" style="font-size:.9rem"></span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="selTodos()" class="btn btn-o btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3)">Seleccionar todos</button>
+        <button onclick="deselTodos()" class="btn btn-o btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3)">Deseleccionar</button>
+        <button onclick="abrirReciboConsolidado()" class="btn btn-g btn-sm">📄 Recibo consolidado</button>
+        {'<button onclick="abrirWAConsolidado()" class="btn btn-wa btn-sm">📱 WA recibo</button>' if telefono else ""}
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start" class="twocol">
-      <div>{filas}</div>
+      <div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+          <button onclick="selTodos()" class="btn btn-xs btn-o">☑ Todos</button>
+          <button onclick="deselTodos()" class="btn btn-xs btn-o">☐ Ninguno</button>
+          <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado seleccionados</button>
+        </div>
+        {filas}
+      </div>
       <div>
         <div class="fcard">
           <h3>Registrar Pago</h3>
@@ -2778,6 +2799,34 @@ def cuenta(id):
     var _waNom = {json.dumps(nombre or "")};
     var _waCuit = {json.dumps(cuit or "")};
 
+    // Checkbox selection for consolidated recibo
+    function updateSel(){{
+      var chks=document.querySelectorAll('.per-chk:checked');
+      var btn=document.getElementById('btn-consolid');
+      if(btn) btn.style.display=chks.length>1?'inline-flex':'none';
+    }}
+    document.addEventListener('change',function(e){{
+      if(e.target.classList.contains('per-chk')) updateSel();
+    }});
+    function selTodos(){{document.querySelectorAll('.per-chk').forEach(c=>c.checked=true);updateSel();}}
+    function deselTodos(){{document.querySelectorAll('.per-chk').forEach(c=>c.checked=false);updateSel();}}
+    function abrirReciboConsolidado(){{
+      var chks=document.querySelectorAll('.per-chk:checked');
+      if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
+      var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
+      var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
+      window.open('/recibo_consolidado/{id}?periodos='+periodos+'&total='+total,'_blank');
+    }}
+    function abrirWAConsolidado(){{
+      var chks=document.querySelectorAll('.per-chk:checked');
+      if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
+      var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
+      var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
+      var url='/recibo_consolidado/{id}?periodos='+periodos+'&total='+total;
+      var _base='{os.getenv("BASE_URL","https://estudio-web-1.onrender.com")}';
+      var msg='Estimado/a '+_waNom+', le enviamos su recibo consolidado de pago por los períodos '+periodos.replace(/-/g,'/').replace(/,/g,', ')+'. Puede verlo aquí: '+_base+url+' -- Estudio Contable Carlon';
+      window.open('https://wa.me/54'+_waTel.replace(/[^0-9]/g,'')+"?text="+encodeURIComponent(msg),'_blank');
+    }}
     function abrirPago(p,s){{
       document.getElementById('mp-sub').textContent=p+' · Saldo: $'+Math.round(s).toLocaleString('es-AR');
       document.getElementById('mp-per').value=p;
@@ -3580,6 +3629,158 @@ def usuarios():
 # ══════════════════════════════════════════════════════════════════════════════
 #  PDF RECIBOS
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/recibo_consolidado/<int:cliente_id>")
+def ver_recibo_consolidado(cliente_id):
+    periodos_raw=request.args.get("periodos","")
+    total_param=request.args.get("total","0")
+    if not periodos_raw:
+        return "Sin períodos seleccionados",400
+    periodos=[p.replace("-","/") for p in periodos_raw.split(",")]
+    try: total_manual=float(total_param)
+    except: total_manual=0
+
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT nombre,cuit FROM clientes WHERE id=%s",(cliente_id,))
+    cli=c.fetchone()
+    if not cli: conn.close(); return "Cliente no encontrado",404
+    cli_nombre,cuit_enc=cli
+    cuit_cli=dec(cuit_enc) if cuit_enc else ""
+
+    # Get actual amounts per period
+    detalles=[]
+    total_real=0
+    for per in periodos:
+        c.execute("SELECT COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        row=c.fetchone()
+        if row:
+            monto=row[1] if row[1]>0 else row[0]
+            detalles.append((per,monto))
+            total_real+=monto
+        else:
+            detalles.append((per,0))
+    conn.close()
+
+    monto_total=total_real if total_real>0 else total_manual
+    pdf=generar_pdf_consolidado(cliente_id,cli_nombre,cuit_cli,detalles,monto_total)
+    dl=request.args.get("download")
+    fname="recibo_consolidado_"+"_".join(p.replace("/","-") for p in periodos[:3])+".pdf"
+    return send_file(pdf,mimetype="application/pdf",as_attachment=bool(dl),download_name=fname)
+
+
+def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_total):
+    """Genera recibo PDF con múltiples períodos"""
+    buffer=BytesIO();cv=canvas.Canvas(buffer,pagesize=A4);w,h=A4
+
+    # Encabezado verde
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(0,h-140,w,140,fill=1,stroke=0)
+    logo_dibujado=False
+    for lp in ["logo.png","static/logo.png"]:
+        if os.path.exists(lp):
+            try:
+                cv.drawImage(ImageReader(lp),28,h-128,width=115,height=110,
+                             preserveAspectRatio=True,mask="auto")
+                logo_dibujado=True
+            except: pass
+            break
+    if not logo_dibujado:
+        cv.setFillColorRGB(0.78,0.66,0.43);cv.setFont("Helvetica-Bold",26)
+        cv.drawString(28,h-55,"CARLON")
+        cv.setFont("Helvetica",9);cv.setFillColorRGB(1,1,1)
+        cv.drawString(28,h-70,"ESTUDIO CONTABLE")
+
+    cv.setFillColorRGB(0.78,0.66,0.43);cv.setFont("Helvetica-Bold",20)
+    cv.drawString(158,h-52,"RECIBO DE PAGO")
+    cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica",8)
+    cv.drawString(158,h-66,"Estudio Contable Carlon — Servicios Contables e Impositivos")
+    numero=datetime.now().strftime("%Y%m%d%H%M%S")
+    cv.setFont("Helvetica-Bold",9);cv.drawRightString(w-36,h-52,f"N° {numero}")
+    cv.setFont("Helvetica",8);cv.drawRightString(w-36,h-66,datetime.now().strftime("%d/%m/%Y %H:%M"))
+
+    # Emisor
+    cv.setFillColorRGB(0.15,0.15,0.15);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-160,"EMISOR")
+    cv.setFont("Helvetica",8.5);cv.drawString(36,h-174,"Estudio Contable Carlon  ·  CUIT: 27-35045505-7")
+    cv.drawString(36,h-186,"Absalón Rojas s/n  ·  Quimilí, Santiago del Estero  ·  CP 3740")
+    cv.setStrokeColorRGB(0.87,0.87,0.87);cv.line(36,h-198,w-36,h-198)
+
+    # Cliente
+    cv.setFillColorRGB(0.53,0.53,0.53);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-216,"CLIENTE")
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",13);cv.drawString(36,h-232,cli_nombre)
+    cv.setFont("Helvetica",8.5);cv.setFillColorRGB(0.3,0.3,0.3)
+    cv.drawString(36,h-246,f"CUIT: {cuit_cli or '—'}")
+
+    # Detalle de períodos
+    y=h-270
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",9)
+    cv.drawString(36,y,"DETALLE DE PERÍODOS")
+    y-=14
+    cv.setStrokeColorRGB(0.87,0.87,0.87);cv.line(36,y,w-36,y)
+    y-=4
+
+    # Header tabla
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(36,y-14,w-72,16,fill=1,stroke=0)
+    cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica-Bold",8)
+    cv.drawString(44,y-10,"Período");cv.drawRightString(w-44,y-10,"Importe")
+    y-=18
+
+    total_check=0
+    for i,(per,monto) in enumerate(detalles):
+        if i%2==0:
+            cv.setFillColorRGB(0.97,0.96,0.93);cv.rect(36,y-12,w-72,14,fill=1,stroke=0)
+        cv.setFillColorRGB(0.15,0.15,0.15);cv.setFont("Helvetica",9)
+        cv.drawString(44,y-9,per)
+        try: mf=f"$ {float(monto):,.0f}".replace(",",".")
+        except: mf=f"$ {monto}"
+        cv.drawRightString(w-44,y-9,mf)
+        cv.setStrokeColorRGB(0.9,0.9,0.9);cv.line(36,y-12,w-36,y-12)
+        total_check+=float(monto or 0)
+        y-=16
+
+    # Total
+    y-=6
+    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,y-22,w-72,28,4,fill=1,stroke=0)
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",11)
+    cv.drawString(44,y-12,"TOTAL ABONADO")
+    try: tf=f"$ {float(monto_total):,.0f}".replace(",",".")
+    except: tf=f"$ {monto_total}"
+    cv.drawRightString(w-44,y-12,tf)
+    y-=36
+
+    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.45,0.45,0.45)
+    cv.drawString(36,y,"Recibí conforme el importe indicado en concepto de honorarios profesionales.")
+    y-=30
+
+    # Firmas
+    cv.setStrokeColorRGB(0.72,0.72,0.72)
+    cv.line(36,y,195,y);cv.line(w-195,y,w-36,y)
+    cv.setFont("Helvetica",8);cv.setFillColorRGB(0.5,0.5,0.5)
+    cv.drawString(36,y-13,"Firma");cv.drawString(w-195,y-13,"Aclaración")
+
+    # Datos bancarios + QR
+    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,36,int((w-72)*0.62),118,8,fill=1,stroke=0)
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",9);cv.drawString(52,144,"DATOS PARA TRANSFERENCIA")
+    cv.setFont("Helvetica",8.5);cv.setFillColorRGB(0.2,0.2,0.2)
+    for ii,ln in enumerate(["Titular: Alexis Natasha Carlon","CUIL: 27-35045505-7  ·  Banco Nacion Argentina","CBU: 0110420630042013452529","Alias: ESTUDIO.CONTA.CARLON"]):
+        cv.drawString(52,126-ii*16,ln)
+
+    # QR
+    try: monto_int=int(float(monto_total))
+    except: monto_int=0
+    qr=qrcode.QRCode(version=2,error_correction=qrcode.constants.ERROR_CORRECT_M,box_size=5,border=2)
+    qr.add_data("0110420630042013452529")
+    qr.make(fit=True)
+    qr_img=qr.make_image(fill_color="black",back_color="white")
+    qb=BytesIO();qr_img.save(qb,"PNG");qb.seek(0)
+    qr_x=w-150;qr_y=30;qr_sz=116
+    cv.setFillColorRGB(1,1,1);cv.roundRect(qr_x-5,qr_y-5,qr_sz+10,qr_sz+10,6,fill=1,stroke=0)
+    cv.drawImage(ImageReader(qb),qr_x,qr_y,width=qr_sz,height=qr_sz)
+    cv.setFont("Helvetica-Bold",7);cv.setFillColorRGB(0.10,0.23,0.16)
+    cv.drawCentredString(qr_x+qr_sz//2,qr_y-10,"Escanear con cualquier home banking")
+    cv.setFont("Helvetica",6.5);cv.setFillColorRGB(0.4,0.4,0.4)
+    cv.drawCentredString(qr_x+qr_sz//2,qr_y-20,"Alias: ESTUDIO.CONTA.CARLON  |  $"+str(monto_int))
+
+    cv.save();buffer.seek(0);return buffer
+
 def generar_pdf(cliente_id, periodo, monto):
     buffer=BytesIO();cv=canvas.Canvas(buffer,pagesize=A4);w,h=A4
     conn=conectar();c=conn.cursor()
