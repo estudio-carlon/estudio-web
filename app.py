@@ -2432,11 +2432,12 @@ def cuenta(id):
             conn.commit()
             registrar_auditoria("PAGO REGISTRADO",f"Periodo:{periodo} | Monto:{fmt(pago)} | Medio:{medio}",id,nombre_cli)
             flash=f'<div class="flash fok">Pago de {fmt(pago)} registrado - {medio}</div>'
-    c.execute("SELECT nombre,cuit,telefono,email FROM clientes WHERE id=%s",(id,))
+    c.execute("SELECT nombre,cuit,telefono,email,abono FROM clientes WHERE id=%s",(id,))
     cli=c.fetchone()
     if not cli: return "Cliente no encontrado",404
-    nombre,cuit_enc,tel_enc,email_enc=cli
+    nombre,cuit_enc,tel_enc,email_enc,abono_cli=cli
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
+    abono_cli=float(abono_cli or 0)
     c.execute("SELECT periodo,COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s ORDER BY id DESC",(id,))
     datos=c.fetchall()
     # Historial - columnas nuevas opcionales
@@ -2457,14 +2458,28 @@ def cuenta(id):
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
     telefono=(tel or "").replace(" ","").replace("+","").strip()
     filas=""
+    # Obtener periodos que tienen al menos un pago registrado
+    c4=conn.cursor()
+    c4.execute("SELECT DISTINCT periodo FROM pagos WHERE cliente_id=%s",(id,))
+    periodos_con_pago={row[0] for row in c4.fetchall()}
+    c4.close()
     for d in datos:
         saldo=d[1]-d[2]
-        if saldo<=0:
+        tiene_pago = d[0] in periodos_con_pago
+        if d[2]>0 and saldo<=0:
             badge='<span class="badge bp">PAGADO</span>'
-        elif d[2]>0:
+        elif d[2]>0 and saldo>0:
             badge='<span class="badge bpar">PARCIAL — debe '+fmt(saldo)+'</span>'
+        elif d[1]>0:
+            badge='<span class="badge bd">DEBE '+fmt(d[1])+'</span>'
+        elif tiene_pago:
+            badge='<span class="badge bp">PAGADO</span>'
         else:
-            badge='<span class="badge bd">DEBE '+fmt(saldo)+'</span>'
+            # d[1]==0, d[2]==0 sin pagos - usar abono del cliente
+            if abono_cli>0:
+                badge='<span class="badge bd">DEBE '+fmt(abono_cli)+'</span>'
+            else:
+                badge='<span class="badge" style="background:#f0f0f0;color:#888">Sin cargo</span>'
         pu=d[0].replace("/","-")
         per_esc=d[0].replace('/','-')
         if saldo>0.5:
