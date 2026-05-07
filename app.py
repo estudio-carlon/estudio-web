@@ -2599,7 +2599,7 @@ def cuenta(id):
       <div class="scard r"><div class="slabel">Deuda Pendiente</div><div class="sval">{fmt(total_deuda)}</div></div>
     </div>
     {flash}
-    <div id="sel-bar" style="display:none;background:var(--primary);color:#fff;border-radius:var(--r);padding:12px 18px;margin-bottom:12px;display:none;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div id="sel-bar" style="display:none;background:var(--primary);color:#fff;border-radius:var(--r);padding:12px 18px;margin-bottom:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
       <span id="sel-info" style="font-size:.9rem"></span>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="selTodos()" class="btn btn-o btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3)">Seleccionar todos</button>
@@ -2613,7 +2613,7 @@ def cuenta(id):
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
           <button onclick="selTodos()" class="btn btn-xs btn-o">☑ Todos</button>
           <button onclick="deselTodos()" class="btn btn-xs btn-o">☐ Ninguno</button>
-          <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado seleccionados</button>
+          <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado (0 períodos)</button>
         </div>
         {filas}
       </div>
@@ -2803,13 +2803,37 @@ def cuenta(id):
     function updateSel(){{
       var chks=document.querySelectorAll('.per-chk:checked');
       var btn=document.getElementById('btn-consolid');
-      if(btn) btn.style.display=chks.length>1?'inline-flex':'none';
+      var bar=document.getElementById('sel-bar');
+      var info=document.getElementById('sel-info');
+      if(btn){{
+        if(chks.length>=1){{
+          btn.style.display='inline-flex';
+          btn.textContent='📄 Recibo consolidado ('+chks.length+' períodos)';
+        }} else {{
+          btn.style.display='none';
+        }}
+      }}
+      if(bar) bar.style.display=chks.length>=1?'flex':'none';
+      if(info) info.textContent=chks.length+' período(s) seleccionado(s)';
     }}
+    // Escuchar cambios en checkboxes
     document.addEventListener('change',function(e){{
-      if(e.target.classList.contains('per-chk')) updateSel();
+      if(e.target && e.target.classList && e.target.classList.contains('per-chk')) updateSel();
     }});
-    function selTodos(){{document.querySelectorAll('.per-chk').forEach(c=>c.checked=true);updateSel();}}
-    function deselTodos(){{document.querySelectorAll('.per-chk').forEach(c=>c.checked=false);updateSel();}}
+    // También escuchar clicks directos por si acaso
+    document.addEventListener('click',function(e){{
+      if(e.target && e.target.classList && e.target.classList.contains('per-chk')) setTimeout(updateSel,50);
+    }});
+    function selTodos(){{
+      document.querySelectorAll('.per-chk').forEach(function(c){{c.checked=true;}});
+      updateSel();
+    }}
+    function deselTodos(){{
+      document.querySelectorAll('.per-chk').forEach(function(c){{c.checked=false;}});
+      updateSel();
+    }}
+    // Correr al cargar para reflejar estado inicial
+    setTimeout(updateSel, 200);
     function abrirReciboConsolidado(){{
       var chks=document.querySelectorAll('.per-chk:checked');
       if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
