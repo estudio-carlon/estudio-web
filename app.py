@@ -387,9 +387,9 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda"),("/novedades","Novedades")]
+    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -449,6 +449,11 @@ def init_db():
         estado TEXT DEFAULT 'pendiente',nota TEXT DEFAULT '',
         usuario TEXT,fecha_actualizacion TEXT,
         UNIQUE(vencimiento_id,mes,anio))""")
+    c.execute("""CREATE TABLE IF NOT EXISTS tareas(
+        id SERIAL PRIMARY KEY,titulo TEXT,descripcion TEXT,
+        usuario TEXT,asignado_a TEXT,estado TEXT DEFAULT 'pendiente',
+        prioridad TEXT DEFAULT 'normal',fecha_creacion TEXT,
+        fecha_actualizacion TEXT,fecha_vencimiento TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS seguridad_eventos(
         id SERIAL PRIMARY KEY,tipo TEXT,detalle TEXT,ip TEXT,
         usuario TEXT,fecha TEXT,resuelto BOOLEAN DEFAULT FALSE)""")
@@ -504,6 +509,8 @@ def actualizar_db():
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS observaciones TEXT",
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT FALSE",
         "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS emitido_por TEXT",
+        "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS concepto TEXT",
+        "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS periodos_incluidos TEXT",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS condicion_fiscal TEXT DEFAULT 'Responsable Inscripto'",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS actividad TEXT",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS envio_wa_facturas BOOLEAN DEFAULT FALSE",
@@ -670,7 +677,7 @@ def login():
                     registrar_evento_seguridad("LOGIN_OK",f"Login exitoso",ip,data[2] or user)
                     if session["rol"]=="admin": return redirect("/panel")
                     elif session["rol"]=="supervisor": return redirect("/app")
-                    else: return redirect("/clientes")
+                    else: return redirect("/panel_sec")
             else:
                 count = registrar_intento_fallido(ip)
                 restantes = max(0, MAX_INTENTOS - count)
@@ -798,6 +805,170 @@ def logout():
     registrar_auditoria("LOGOUT","Cierre de sesion")
     registrar_evento_seguridad("LOGOUT","Cierre de sesion",get_ip())
     session.clear();return redirect("/")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PANEL SECRETARIA
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/panel_sec")
+@login_req
+def panel_sec():
+    if session.get("rol")=="admin": return redirect("/panel")
+    conn=conectar();c=conn.cursor()
+    usuario=session.get("display","")
+    hoy=datetime.now()
+    fecha_hoy=hoy.strftime("%d/%m/%Y")
+    mes=hoy.month; anio=hoy.year
+
+    # Totales del dia para esta secretaria
+    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s",
+              (fecha_hoy+"%",usuario))
+    cobrado_hoy=c.fetchone()[0]
+
+    # Clientes atendidos hoy
+    c.execute("SELECT COUNT(DISTINCT cliente_id) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s",
+              (fecha_hoy+"%",usuario))
+    clientes_hoy=c.fetchone()[0]
+
+    # Vencimientos del mes
+    c.execute("SELECT vencimiento_id,estado FROM agenda_vencimientos WHERE mes=%s AND anio=%s",(mes,anio))
+    venc_estados={r[0]:r[1] for r in c.fetchall()}
+    proximos=[]
+    for v in VENCIMIENTOS_IMPOSITIVOS:
+        dias_rest=v["dia"]-hoy.day
+        est=venc_estados.get(v["id"],"pendiente")
+        if est in ("pendiente","borrador") and 0<=dias_rest<=7:
+            proximos.append((v["nombre"],v["dia"],dias_rest,est))
+
+    # Clientes RI que no han enviado facturas este mes
+    mes_str=hoy.strftime("%m/%Y")
+    c.execute("""SELECT COUNT(*) FROM clientes WHERE envio_wa_facturas=TRUE
+                 AND activo IS NOT FALSE""")
+    n_ri=c.fetchone()[0]
+
+    # Tareas pendientes de esta secretaria
+    c.execute("""SELECT id,titulo,estado,prioridad,fecha_vencimiento FROM tareas
+                 WHERE (asignado_a=%s OR usuario=%s) AND estado!='completada'
+                 ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
+                          fecha_vencimiento NULLS LAST LIMIT 10""",(usuario,usuario))
+    mis_tareas=c.fetchall(); conn.close()
+
+    # Vencimientos alertas
+    alerta_venc=""
+    if proximos:
+        items="".join(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-size:.82rem;font-weight:600">{v[0]}</span><span class="{"sec-badge danger" if v[2]<=2 else "sec-badge warn"}">{("VENCE HOY" if v[2]==0 else f"en {v[2]} días")}</span></div>' for v in proximos)
+        alerta_venc=f'<div class="warn-box" style="margin-bottom:14px"><b>⏰ Vencimientos próximos ({len(proximos)})</b>{items}</div>'
+
+    # Recordatorio RI
+    rec_ri=(f'<div class="info-box" style="margin-bottom:14px">'
+            f'📂 Hay <b>{n_ri}</b> clientes RI — recordá pedir facturas de compras este mes</div>' if n_ri>0 else "")
+
+    # Tareas HTML
+    PRIO_COLOR={"urgente":"var(--danger)","alta":"var(--warning)","normal":"var(--info)","baja":"var(--muted)"}
+    tareas_html=""
+    for t in mis_tareas:
+        tid,titulo,est,prio,fvenc=t
+        col=PRIO_COLOR.get(prio,"var(--info)")
+        est_badge=('<span class="sec-badge warn">Borrador</span>' if est=="borrador"
+                   else '<span class="sec-badge">Pendiente</span>')
+        venc_txt=(f'<span style="font-size:.7rem;color:var(--muted)"> · Vence: {fvenc}</span>' if fvenc else "")
+        tareas_html+=(f'<div class="logrow" style="justify-content:space-between;align-items:center">'
+                     f'<div><div class="log-dot" style="background:{col}"></div></div>'
+                     f'<div style="flex:1;margin-left:8px">'
+                     f'<span style="font-weight:600;font-size:.85rem">{titulo}</span>{venc_txt}'
+                     f'<br>{est_badge}</div>'
+                     f'<div style="display:flex;gap:4px">'
+                     f'<a href="/tareas?editar={tid}" class="btn btn-xs btn-o">✏️</a>'
+                     f'<form method="post" action="/tareas/completar/{tid}" style="display:inline">'
+                     f'<button class="btn btn-xs btn-g" title="Completar">✓</button></form>'
+                     f'</div></div>')
+    if not tareas_html:
+        tareas_html='<p style="color:var(--muted);font-size:.84rem;padding:8px 0">Sin tareas pendientes ✨</p>'
+
+    mes_nombre=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio",
+                "Agosto","Septiembre","Octubre","Noviembre","Diciembre"][mes]
+
+    body=f"""
+    <h1 class="page-title">Bienvenida, {usuario.split()[0] if usuario else ""}!</h1>
+    <p class="page-sub">{mes_nombre} {anio} · {fecha_hoy}</p>
+
+    <!-- Dolar + Reloj -->
+    <div style="background:var(--card);border-radius:var(--r);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+        <div><span style="font-size:.62rem;font-weight:700;color:var(--muted);text-transform:uppercase">Dolar BNA Oficial</span>
+          <div style="display:flex;gap:12px;margin-top:2px">
+            <div><span style="font-size:.68rem;color:var(--muted)">Compra</span> <span id="ps-cmp" style="font-weight:700;color:var(--success)">---</span></div>
+            <div><span style="font-size:.68rem;color:var(--muted)">Venta</span> <span id="ps-vta" style="font-weight:700;color:var(--danger)">---</span></div>
+            <div><span style="font-size:.68rem;color:var(--muted)">Divisa</span> <span id="ps-div" style="font-weight:700;color:var(--warning)">---</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div id="ps-reloj" style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)"></div>
+        <div id="ps-fecha" style="font-size:.74rem;color:var(--muted)"></div>
+      </div>
+    </div>
+
+    <!-- Stats del dia -->
+    <div class="stats" style="margin-bottom:16px">
+      <div class="scard g"><div class="sicon">💰</div><div class="slabel">Cobrado hoy</div><div class="sval">{fmt(cobrado_hoy)}</div></div>
+      <div class="scard b"><div class="sicon">👥</div><div class="slabel">Clientes hoy</div><div class="sval">{clientes_hoy}</div></div>
+      <div class="scard o"><div class="sicon">⏰</div><div class="slabel">Vencimientos próximos</div><div class="sval">{len(proximos)}</div></div>
+    </div>
+
+    {alerta_venc}
+    {rec_ri}
+
+    <!-- Grid principal -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="twocol">
+
+      <!-- Tareas pendientes -->
+      <div class="fcard" style="margin-bottom:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin-bottom:0">📝 Mis tareas</h3>
+          <a href="/tareas" class="btn btn-o btn-sm">Ver todas</a>
+        </div>
+        {tareas_html}
+        <div style="margin-top:12px">
+          <a href="/tareas?nueva=1" class="btn btn-p btn-sm">+ Nueva tarea</a>
+        </div>
+      </div>
+
+      <!-- Novedades rápidas -->
+      <div class="fcard" style="margin-bottom:0">
+        <h3>📋 Accesos rápidos</h3>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <a href="/clientes" class="btn btn-p btn-sm">👥 Clientes</a>
+          <a href="/caja" class="btn btn-o btn-sm">🏦 Mi Caja</a>
+          <a href="/agenda" class="btn btn-o btn-sm">📅 Agenda Vencimientos</a>
+          <a href="/novedades" class="btn btn-o btn-sm">📰 Novedades</a>
+          <a href="/wa_masivo" class="btn btn-wa btn-sm">📱 WA Masivo</a>
+          <a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-arca btn-sm">ARCA Login</a>
+          <a href="https://servicioscf.afip.gob.ar/publico/sitio/contenido/novedad/listado.aspx" target="_blank" class="btn btn-o btn-sm">Novedades AFIP</a>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+    fetch('https://dolarapi.com/v1/dolares/oficial').then(r=>r.json()).then(d=>{{
+      var f=n=>'$'+n.toLocaleString('es-AR',{{minimumFractionDigits:2}});
+      document.getElementById('ps-cmp').textContent=f(d.compra);
+      document.getElementById('ps-vta').textContent=f(d.venta);
+    }}).catch(()=>{{}});
+    fetch('https://dolarapi.com/v1/dolares/tarjeta').then(r=>r.json()).then(d=>{{
+      document.getElementById('ps-div').textContent='$'+d.venta.toLocaleString('es-AR',{{minimumFractionDigits:2}});
+    }}).catch(()=>{{}});
+    function tick(){{
+      var n=new Date(),pad=x=>x.toString().padStart(2,"0");
+      var dias=["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+      document.getElementById('ps-reloj').textContent=pad(n.getHours())+":"+pad(n.getMinutes())+":"+pad(n.getSeconds());
+      document.getElementById('ps-fecha').textContent=dias[n.getDay()]+" "+pad(n.getDate())+"/"+(pad(n.getMonth()+1))+"/"+n.getFullYear();
+    }}
+    tick();setInterval(tick,1000);
+    </script>
+    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
+    return page("Panel", body, "Clientes")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  PANEL PRINCIPAL con gráficos Chart.js
@@ -2144,20 +2315,70 @@ def editar_pago():
 def cuenta(id):
     conn=conectar();c=conn.cursor();flash=""
     if request.method=="POST":
-        periodo=request.form.get("periodo","").strip();pago=float(request.form.get("pago",0) or 0)
-        medio=request.form.get("medio","Efectivo");obs=request.form.get("observaciones","").strip()
+        tipo_reg=request.form.get("tipo_registro","simple")
+        pago=float(request.form.get("pago",0) or 0)
+        medio=request.form.get("medio","Efectivo")
+        obs=request.form.get("observaciones","").strip()
         facturado=request.form.get("facturado","0")=="1"
-        c.execute("SELECT id,haber FROM cuentas WHERE cliente_id=%s AND periodo=%s",(id,periodo))
-        row=c.fetchone()
-        if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(pago,id,periodo))
-        else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,periodo,pago))
-        conn.commit()
+        concepto=request.form.get("concepto","Honorarios mensuales").strip()
+        periodos_sel=request.form.getlist("periodos_sel")
+        periodo_simple=request.form.get("periodo","").strip()
+        saldo_manual=float(request.form.get("saldo_manual",0) or 0)
         c.execute("SELECT nombre FROM clientes WHERE id=%s",(id,));nom=c.fetchone();nombre_cli=nom[0] if nom else "?"
-        c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                  (id,periodo,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display","")))
-        conn.commit()
-        registrar_auditoria("PAGO REGISTRADO",f"Periodo:{periodo} | Monto:{fmt(pago)} | Medio:{medio}",id,nombre_cli)
-        flash=f'<div class="flash fok">Pago de {fmt(pago)} registrado - {medio}</div>'
+
+        if tipo_reg=="multiple" and periodos_sel:
+            # Pago de múltiples periodos
+            n_per=len(periodos_sel)
+            monto_por_per=round(pago/n_per,2) if n_per>0 else pago
+            periodos_str=",".join(periodos_sel)
+            for per in periodos_sel:
+                c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(id,per))
+                row=c.fetchone()
+                if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(monto_por_per,id,per))
+                else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,per,monto_por_per))
+            # Si hay saldo a favor o deudor
+            if saldo_manual!=0:
+                per_saldo=periodos_sel[-1]
+                if saldo_manual>0:  # saldo a favor del cliente
+                    c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(saldo_manual,id,per_saldo))
+                else:  # saldo deudor
+                    c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(id,per_saldo))
+                    if not c.fetchone():
+                        c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(id,per_saldo,abs(saldo_manual)))
+            conn.commit()
+            c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                      (id,periodos_sel[0],pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,periodos_str))
+            conn.commit()
+            registrar_auditoria("PAGO MULTIPLE",f"Periodos:{periodos_str} | Total:{fmt(pago)} | {medio}",id,nombre_cli)
+            flash=f'<div class="flash fok">Pago de {fmt(pago)} registrado por {n_per} periodos ({periodos_str})</div>'
+
+        elif tipo_reg=="concepto_libre":
+            # Recibo por concepto libre (certificación, DJ, etc.)
+            periodo_uso=periodo_simple or datetime.now().strftime("%m/%Y")
+            c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(id,periodo_uso))
+            row=c.fetchone()
+            if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(pago,id,periodo_uso))
+            else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,periodo_uso,pago))
+            conn.commit()
+            c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                      (id,periodo_uso,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,""))
+            conn.commit()
+            registrar_auditoria("PAGO CONCEPTO",f"Concepto:{concepto} | {fmt(pago)} | {medio}",id,nombre_cli)
+            flash=f'<div class="flash fok">{fmt(pago)} registrado — {concepto}</div>'
+
+        else:
+            # Pago simple normal
+            periodo=periodo_simple
+            c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(id,periodo))
+            row=c.fetchone()
+            if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(pago,id,periodo))
+            else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,periodo,pago))
+            conn.commit()
+            c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                      (id,periodo,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,""))
+            conn.commit()
+            registrar_auditoria("PAGO REGISTRADO",f"Periodo:{periodo} | Monto:{fmt(pago)} | Medio:{medio}",id,nombre_cli)
+            flash=f'<div class="flash fok">Pago de {fmt(pago)} registrado - {medio}</div>'
     c.execute("SELECT nombre,cuit,telefono,email FROM clientes WHERE id=%s",(id,))
     cli=c.fetchone()
     if not cli: return "Cliente no encontrado",404
@@ -2165,7 +2386,7 @@ def cuenta(id):
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
     c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC",(id,))
     datos=c.fetchall()
-    c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
+    c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id,COALESCE(concepto,'Honorarios mensuales'),COALESCE(periodos_incluidos,'') FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
     historial=c.fetchall();conn.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
@@ -2229,16 +2450,30 @@ def cuenta(id):
         emitido=h[7] or h[1]
         pid=h[8]
         btn_edit='<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>'
+        concepto_p=h[9] if len(h)>9 and h[9] else "Honorarios"
+        periodos_p=h[10] if len(h)>10 and h[10] else ""
+        periodo_disp=h[2]+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else "")
         hist_rows+=('<div class="logrow" style="justify-content:space-between;align-items:center">'
                     +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
                     +'<div class="log-dot"></div>'
                     +'<span class="log-time">'+h[0]+'</span>'
                     +'<span class="log-user">'+emitido+'</span>'
-                    +'<span class="log-msg"><b>'+h[2]+'</b> · '+fmt(h[3])+' · '+h[4]
+                    +'<span class="log-msg"><b>'+periodo_disp+'</b>'
+                    +(f' · <span style="color:var(--info);font-size:.75rem;font-weight:600">{concepto_p}</span>' if concepto_p!="Honorarios mensuales" else "")
+                    +' · '+fmt(h[3])+' · '+h[4]
                     +((" · "+h[6]) if h[6] else "")+' '+fact_b+'</span>'
                     +'</div>'
                     +btn_edit+'</div>')
     medios_opts="".join(f'<option value="{m}">{m}</option>' for m in MEDIOS_PAGO)
+    medios_opts2=medios_opts
+    medios_opts3=medios_opts
+    # Periodos con deuda para selector multiple
+    periodos_deudores=[d[0] for d in datos if d[1]-d[2]>0.5]
+    periodos_deudores_html="".join(
+        f'<label style="display:flex;align-items:center;gap:4px;background:var(--bg);border:1.5px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:.82rem">'
+        f'<input type="checkbox" name="periodos_sel" value="{p}" style="width:auto">{p}</label>'
+        for p in periodos_deudores
+    ) or '<span style="color:var(--muted);font-size:.82rem">Sin períodos con deuda pendiente</span>'
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Clientes</a>
     <h1 class="page-title">{nombre}</h1>
@@ -2253,16 +2488,101 @@ def cuenta(id):
       <div>
         <div class="fcard">
           <h3>Registrar Pago</h3>
-          <form method="post">
-            <div class="fgrid" style="grid-template-columns:1fr">
-              <div class="fg"><label>Periodo (MM/AAAA)</label><input name="periodo" value="{datetime.now().strftime('%m/%Y')}" required></div>
-              <div class="fg"><label>Monto $</label><input name="pago" type="number" step="0.01" required></div>
-              <div class="fg"><label>Medio de pago</label><select name="medio">{medios_opts}</select></div>
-              <div class="fg"><label>Observaciones</label><input name="observaciones" placeholder="Opcional"></div>
-              <div class="fg" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="facturado" value="1" id="chk-fact" style="width:auto"> <label style="text-transform:none;font-size:.84rem;cursor:pointer" for="chk-fact">Emitir factura ARCA</label></div>
-            </div>
-            <button class="btn btn-g">Registrar Pago</button>
-          </form>
+          <div class="tabs" style="margin-bottom:12px">
+            <button class="tab on" onclick="showRegTab('rt-simple',this)">Honorario mensual</button>
+            <button class="tab" onclick="showRegTab('rt-multiple',this)">Varios periodos</button>
+            <button class="tab" onclick="showRegTab('rt-concepto',this)">Concepto libre</button>
+          </div>
+
+          <!-- TAB SIMPLE -->
+          <div id="rt-simple" class="regpanel on">
+            <form method="post">
+              <input type="hidden" name="tipo_registro" value="simple">
+              <input type="hidden" name="concepto" value="Honorarios mensuales">
+              <div class="fgrid" style="grid-template-columns:1fr">
+                <div class="fg"><label>Periodo (MM/AAAA)</label><input name="periodo" value="{datetime.now().strftime('%m/%Y')}" required></div>
+                <div class="fg"><label>Monto $</label><input name="pago" type="number" step="0.01" required></div>
+                <div class="fg"><label>Medio de pago</label><select name="medio">{medios_opts}</select></div>
+                <div class="fg"><label>Observaciones</label><input name="observaciones" placeholder="Opcional"></div>
+                <div class="fg" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="facturado" value="1" id="chk-fact" style="width:auto"> <label style="text-transform:none;font-size:.84rem;cursor:pointer" for="chk-fact">Emitir factura ARCA</label></div>
+              </div>
+              <button class="btn btn-g">Registrar</button>
+            </form>
+          </div>
+
+          <!-- TAB MULTIPLES PERIODOS -->
+          <div id="rt-multiple" class="regpanel">
+            <form method="post">
+              <input type="hidden" name="tipo_registro" value="multiple">
+              <input type="hidden" name="concepto" value="Honorarios mensuales">
+              <div class="info-box" style="margin-bottom:10px;font-size:.79rem">Seleccioná los períodos que incluye este pago. El monto se divide proporcionalmente.</div>
+              <div class="fg" style="margin-bottom:10px">
+                <label>Periodos a incluir (seleccioná los que corresponden)</label>
+                <div id="periodos-check" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+                  {periodos_deudores_html}
+                </div>
+              </div>
+              <div class="fgrid" style="grid-template-columns:1fr">
+                <div class="fg"><label>Total cobrado $</label><input name="pago" type="number" step="0.01" id="monto-multi" required></div>
+                <div class="fg"><label>Saldo a favor (+) o deudor (-) que queda</label><input name="saldo_manual" type="number" step="0.01" placeholder="0" id="saldo-rest"></div>
+                <div class="fg"><label>Medio de pago</label><select name="medio">{medios_opts2}</select></div>
+                <div class="fg"><label>Observaciones</label><input name="observaciones" placeholder="Opcional"></div>
+              </div>
+              <div id="multi-resumen" class="info-box" style="font-size:.8rem;margin-bottom:10px"></div>
+              <button class="btn btn-g">Registrar pago multiplo</button>
+            </form>
+          </div>
+
+          <!-- TAB CONCEPTO LIBRE -->
+          <div id="rt-concepto" class="regpanel">
+            <form method="post">
+              <input type="hidden" name="tipo_registro" value="concepto_libre">
+              <div class="info-box" style="margin-bottom:10px;font-size:.79rem">Para recibos por certificaciones, DDJJ, trámites, etc.</div>
+              <div class="fgrid" style="grid-template-columns:1fr">
+                <div class="fg"><label>Concepto *</label>
+                  <input name="concepto" list="conceptos-lista" placeholder="Ej: Certificación contable" required>
+                  <datalist id="conceptos-lista">
+                    <option value="Certificacion contable">
+                    <option value="Declaracion Jurada Ganancias">
+                    <option value="Declaracion Jurada Bienes Personales">
+                    <option value="Tramite AFIP/ARCA">
+                    <option value="Liquidacion de sueldos">
+                    <option value="Confeccion balance">
+                    <option value="Inscripcion monotributo">
+                    <option value="Baja monotributo">
+                    <option value="Honorarios adicionales">
+                  </datalist>
+                </div>
+                <div class="fg"><label>Periodo de referencia</label><input name="periodo" value="{datetime.now().strftime('%m/%Y')}"></div>
+                <div class="fg"><label>Monto $</label><input name="pago" type="number" step="0.01" required></div>
+                <div class="fg"><label>Medio de pago</label><select name="medio">{medios_opts3}</select></div>
+                <div class="fg"><label>Detalle adicional</label><input name="observaciones" placeholder="Detalle del servicio..."></div>
+                <div class="fg" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="facturado" value="1" id="chk-fact-c" style="width:auto"> <label style="text-transform:none;font-size:.84rem;cursor:pointer" for="chk-fact-c">Emitir factura ARCA</label></div>
+              </div>
+              <button class="btn btn-g">Emitir recibo</button>
+            </form>
+          </div>
+          <style>.regpanel{display:none}.regpanel.on{display:block}</style>
+          <script>
+          function showRegTab(id,btn){{
+            document.querySelectorAll(".regpanel").forEach(p=>p.classList.remove("on"));
+            document.querySelectorAll(".tab").forEach(b=>b.classList.remove("on"));
+            document.getElementById(id).classList.add("on");btn.classList.add("on");}}
+          // Resumen multipago
+          document.addEventListener("change",function(){{
+            var chks=document.querySelectorAll("#periodos-check input:checked");
+            var monto=parseFloat(document.getElementById("monto-multi")?.value||0)||0;
+            var saldo=parseFloat(document.getElementById("saldo-rest")?.value||0)||0;
+            var n=chks.length;
+            var res=document.getElementById("multi-resumen");
+            if(res&&n>0&&monto>0){{
+              var por_per=Math.round(monto/n);
+              var pers=Array.from(chks).map(c=>c.value).join(", ");
+              res.innerHTML="<b>"+n+" períodos:</b> "+pers+"<br><b>Por período:</b> $"+por_per.toLocaleString("es-AR")
+                +(saldo!==0?"<br><b>Saldo "+(saldo>0?"a favor":"deudor")+":</b> $"+Math.abs(saldo).toLocaleString("es-AR"):"");
+            }} else if(res) res.innerHTML="";
+          }});
+          </script>
         </div>
         <div class="fcard"><h3>Historial</h3>{hist_rows or '<p style="color:var(--muted);font-size:.84rem">Sin pagos</p>'}</div>
       </div>
@@ -3621,6 +3941,156 @@ def app_movil():
             +flash_html+content_tab+
             '</div>'+tab_bar+'</body></html>')
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TAREAS
+# ══════════════════════════════════════════════════════════════════════════════
+@app.route("/tareas", methods=["GET","POST"])
+@login_req
+def tareas():
+    conn=conectar();c=conn.cursor()
+    flash=""; rol=session.get("rol"); usuario=session.get("display","")
+
+    if request.method=="POST":
+        accion=request.form.get("accion","")
+        if accion=="nueva":
+            titulo=request.form.get("titulo","").strip()
+            desc=request.form.get("descripcion","").strip()
+            prio=request.form.get("prioridad","normal")
+            fvenc=request.form.get("fecha_vencimiento","").strip() or None
+            asig=request.form.get("asignado_a",usuario).strip() or usuario
+            if titulo:
+                c.execute("INSERT INTO tareas(titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento) VALUES(%s,%s,%s,%s,'pendiente',%s,%s,%s,%s)",
+                          (titulo,desc,usuario,asig,prio,now_ar(),now_ar(),fvenc))
+                conn.commit(); flash='<div class="flash fok">✅ Tarea creada</div>'
+        elif accion=="actualizar":
+            tid=request.form.get("tid"); nuevo_est=request.form.get("estado")
+            nuevo_titulo=request.form.get("titulo","").strip()
+            nueva_prio=request.form.get("prioridad","normal")
+            nueva_desc=request.form.get("descripcion","").strip()
+            nueva_fvenc=request.form.get("fecha_vencimiento","").strip() or None
+            if tid:
+                c.execute("UPDATE tareas SET estado=%s,titulo=%s,prioridad=%s,descripcion=%s,fecha_vencimiento=%s,fecha_actualizacion=%s WHERE id=%s",
+                          (nuevo_est,nuevo_titulo,nueva_prio,nueva_desc,nueva_fvenc,now_ar(),tid))
+                conn.commit(); flash='<div class="flash fok">✅ Tarea actualizada</div>'
+        elif accion=="borrar" and rol=="admin":
+            tid=request.form.get("tid")
+            if tid: c.execute("DELETE FROM tareas WHERE id=%s",(tid,)); conn.commit()
+            flash='<div class="flash fok">Tarea eliminada</div>'
+
+    # Filtros
+    filtro_est=request.args.get("est","activas")
+    editar_id=request.args.get("editar","")
+
+    # Para admin: ve todas; para secretaria: las propias o asignadas
+    if rol=="admin":
+        if filtro_est=="completadas":
+            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE estado='completada' ORDER BY fecha_actualizacion DESC LIMIT 50")
+        elif filtro_est=="todas":
+            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,fecha_actualizacion DESC")
+        else:
+            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE estado!='completada' ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END")
+    else:
+        if filtro_est=="completadas":
+            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE (asignado_a=%s OR usuario=%s) AND estado='completada' ORDER BY fecha_actualizacion DESC",(usuario,usuario))
+        else:
+            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE (asignado_a=%s OR usuario=%s) AND estado!='completada' ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END",(usuario,usuario))
+
+    lista=c.fetchall()
+
+    # Tarea a editar
+    tarea_edit=None
+    if editar_id:
+        c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE id=%s",(editar_id,))
+        tarea_edit=c.fetchone()
+
+    # Usuarios para asignar
+    c.execute("SELECT nombre_display FROM usuarios WHERE activo IS NOT FALSE ORDER BY nombre_display")
+    usuarios_lista=[r[0] for r in c.fetchall()]
+    conn.close()
+
+    PRIO_COLOR={"urgente":"var(--danger)","alta":"var(--warning)","normal":"var(--info)","baja":"var(--muted)"}
+    PRIO_LABEL={"urgente":"🔴 Urgente","alta":"🟠 Alta","normal":"🔵 Normal","baja":"⚪ Baja"}
+    EST_BADGE={"pendiente":'<span class="sec-badge">⏳ Pendiente</span>',"borrador":'<span class="sec-badge warn">📝 Borrador</span>',"en_progreso":'<span class="sec-badge ok">▶ En progreso</span>',"completada":'<span class="sec-badge ok">✅ Completada</span>'}
+
+    rows=""
+    for t in lista:
+        tid,titulo,desc,usu,asig,est,prio,fcre,fact,fvenc=t
+        col=PRIO_COLOR.get(prio,"var(--info)")
+        est_b=EST_BADGE.get(est,est)
+        prio_b=f'<span style="font-size:.68rem;color:{col};font-weight:700">{PRIO_LABEL.get(prio,prio)}</span>'
+        venc_txt=(f'<br><span style="font-size:.72rem;color:{"var(--danger)" if fvenc and fvenc<=now_ar()[:10] else "var(--muted)"}">Vence: {fvenc}</span>' if fvenc else "")
+        asig_txt=(f'<span style="font-size:.72rem;color:var(--muted)"> → {asig}</span>' if asig and asig!=usu else "")
+        btn_edit=f'<a href="/tareas?editar={tid}" class="btn btn-xs btn-o">✏️ Editar</a>'
+        btn_comp=('<form method="post" style="display:inline"><input type=hidden name=accion value=actualizar>'
+                  +f'<input type=hidden name=tid value={tid}><input type=hidden name=titulo value="{titulo}">'
+                  +'<input type=hidden name=estado value=completada><input type=hidden name=prioridad value='+prio+'>'
+                  +'<button class="btn btn-xs btn-g" title="Marcar como completada">✓ Listo</button></form>') if est!="completada" else ""
+        btn_del=(f'<form method="post" style="display:inline"><input type=hidden name=accion value=borrar><input type=hidden name=tid value={tid}><button class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar?\')">🗑</button></form>') if rol=="admin" else ""
+        rows+=(f'<div class="arow" style="border-left:3px solid {col}">'               f'<div style="flex:1"><span style="font-weight:600">{titulo}</span>{asig_txt}'
+               f'<br>{est_b} {prio_b}{venc_txt}'               +(f'<br><span style="font-size:.76rem;color:var(--muted)">{desc[:80]}{"..." if len(desc or "")>80 else ""}</span>' if desc else "")               +f'<br><span style="font-size:.7rem;color:var(--muted)">Creada por {usu} · {fcre}</span></div>'               +f'<div style="display:flex;gap:5px;flex-wrap:wrap">{btn_edit}{btn_comp}{btn_del}</div></div>')
+
+    # Form nueva/editar tarea
+    if tarea_edit:
+        te=tarea_edit
+        opts_est="".join(f'<option value="{s}" {"selected" if s==te[5] else ""}>{l}</option>' for s,l in [("pendiente","⏳ Pendiente"),("borrador","📝 Borrador"),("en_progreso","▶ En progreso"),("completada","✅ Completada")])
+        opts_prio="".join(f'<option value="{s}" {"selected" if s==te[6] else ""}>{l}</option>' for s,l in [("urgente","🔴 Urgente"),("alta","🟠 Alta"),("normal","🔵 Normal"),("baja","⚪ Baja")])
+        opts_asig="".join(f'<option value="{u}" {"selected" if u==te[4] else ""}>{u}</option>' for u in usuarios_lista)
+        form_html=(f'<div class="fcard" style="margin-bottom:16px;border:2px solid var(--accent)"><h3>✏️ Editar Tarea</h3>'
+                   f'<form method="post"><input type="hidden" name="accion" value="actualizar"><input type="hidden" name="tid" value="{te[0]}">'
+                   f'<div class="fgrid"><div class="fg"><label>Título</label><input name="titulo" value="{te[1]}" required></div>'
+                   f'<div class="fg"><label>Estado</label><select name="estado">{opts_est}</select></div>'
+                   f'<div class="fg"><label>Prioridad</label><select name="prioridad">{opts_prio}</select></div>'
+                   f'<div class="fg"><label>Asignada a</label><select name="asignado_a">{opts_asig}</select></div>'
+                   f'<div class="fg"><label>Vence</label><input name="fecha_vencimiento" type="date" value="{te[9] or ""}"></div></div>'
+                   f'<div class="fg" style="margin-bottom:12px"><label>Descripción</label><textarea name="descripcion" rows="2">{te[2] or ""}</textarea></div>'
+                   f'<div class="mact"><a href="/tareas" class="btn btn-o">Cancelar</a><button type="submit" class="btn btn-a">Guardar cambios</button></div>'
+                   f'</form></div>')
+    else:
+        opts_prio_n="".join(f'<option value="{s}">{l}</option>' for s,l in [("urgente","🔴 Urgente"),("alta","🟠 Alta"),("normal","🔵 Normal"),("baja","⚪ Baja")])
+        opts_prio_n=opts_prio_n.replace('<option value="normal">','<option value="normal" selected>')
+        opts_asig_n="".join(f'<option value="{u}" {"selected" if u==usuario else ""}>{u}</option>' for u in usuarios_lista)
+        show_form=request.args.get("nueva","")
+        form_html=('<div class="fcard" style="margin-bottom:16px"><h3>➕ Nueva Tarea</h3>'
+                   '<form method="post"><input type="hidden" name="accion" value="nueva">'
+                   '<div class="fgrid">'
+                   '<div class="fg"><label>Título *</label><input name="titulo" placeholder="Ej: Llamar a cliente X" required></div>'
+                   f'<div class="fg"><label>Prioridad</label><select name="prioridad">{opts_prio_n}</select></div>'
+                   f'<div class="fg"><label>Asignada a</label><select name="asignado_a">{opts_asig_n}</select></div>'
+                   '<div class="fg"><label>Fecha vence</label><input name="fecha_vencimiento" type="date"></div></div>'
+                   '<div class="fg" style="margin-bottom:12px"><label>Descripción</label><textarea name="descripcion" rows="2" placeholder="Detalle opcional..."></textarea></div>'
+                   '<button class="btn btn-p">Crear tarea</button></form></div>') if show_form else (
+                   '<div style="margin-bottom:14px"><a href="/tareas?nueva=1" class="btn btn-p btn-sm">+ Nueva tarea</a></div>')
+
+    # Tabs filtro
+    def ftab(est,lbl):
+        cls="tab on" if filtro_est==est else "tab"
+        return f'<a href="/tareas?est={est}" class="{cls}" style="text-decoration:none">{lbl}</a>'
+    tabs=('<div class="tabs" style="margin-bottom:16px">'
+          +ftab("activas","⏳ Activas")
+          +ftab("completadas","✅ Completadas")
+          +(ftab("todas","📋 Todas") if rol=="admin" else "")
+          +'</div>')
+
+    n_act=len([t for t in lista if t[5]!="completada"])
+    body=f"""
+    <h1 class="page-title">Agenda de Tareas</h1>
+    <p class="page-sub">{len(lista)} tareas · {"Todas las secretarias" if rol=="admin" else "Mis tareas"}</p>
+    {flash}
+    {tabs}
+    {form_html}
+    {rows or '<div class="info-box">Sin tareas en esta vista ✨</div>'}
+    """
+    return page("Tareas", body, "Clientes")
+
+@app.route("/tareas/completar/<int:tid>", methods=["POST"])
+@login_req
+def completar_tarea(tid):
+    conn=conectar();c=conn.cursor()
+    c.execute("UPDATE tareas SET estado='completada',fecha_actualizacion=%s WHERE id=%s",(now_ar(),tid))
+    conn.commit();conn.close()
+    return redirect(request.referrer or "/tareas")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
