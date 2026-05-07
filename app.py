@@ -2472,26 +2472,28 @@ def cuenta(id):
                +bwr+bem+bp+ba+bc+bw+bdel+'</div></div>')
     hist_rows=""
     for h in historial:
+        # Safety: pad h to at least 11 elements
+        h = tuple(h) + (None,) * (11 - len(h))
         fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
                 if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>')
-        if len(h) < 9: continue  # skip malformed rows
         emitido=h[7] or h[1]
-        pid=h[8] if len(h)>8 else 0
-        btn_edit='<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>'
-        concepto_p=h[9] if len(h)>9 and h[9] else "Honorarios mensuales"
-        periodos_p=h[10] if len(h)>10 and h[10] else ""
+        pid=h[8] if h[8] else 0
+        btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
+        concepto_p=h[9] if h[9] else "Honorarios mensuales"
+        periodos_p=h[10] if h[10] else ""
         periodo_disp=h[2]+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else "")
-        hist_rows+=('<div class="logrow" style="justify-content:space-between;align-items:center">'
-                    +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
-                    +'<div class="log-dot"></div>'
-                    +'<span class="log-time">'+h[0]+'</span>'
-                    +'<span class="log-user">'+emitido+'</span>'
-                    +'<span class="log-msg"><b>'+periodo_disp+'</b>'
-                    +(f' · <span style="color:var(--info);font-size:.75rem;font-weight:600">{concepto_p}</span>' if concepto_p!="Honorarios mensuales" else "")
-                    +' · '+fmt(h[3])+' · '+h[4]
-                    +((" · "+h[6]) if h[6] else "")+' '+fact_b+'</span>'
-                    +'</div>'
-                    +btn_edit+'</div>')
+        hist_rows+=(
+            '<div class="logrow" style="justify-content:space-between;align-items:center">'
+            +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
+            +'<div class="log-dot"></div>'
+            +'<span class="log-time">'+str(h[0])+'</span>'
+            +'<span class="log-user">'+emitido+'</span>'
+            +'<span class="log-msg"><b>'+periodo_disp+'</b>'
+            +(f' · <span style="color:var(--info);font-size:.75rem;font-weight:600">{concepto_p}</span>' if concepto_p!="Honorarios mensuales" else "")
+            +' · '+fmt(h[3])+' · '+str(h[4] or "")
+            +(((" · "+str(h[6])) if h[6] else "")+' '+fact_b+'</span>')
+            +'</div>'
+            +btn_edit+'</div>')
     medios_opts="".join(f'<option value="{m}">{m}</option>' for m in MEDIOS_PAGO)
     medios_opts2=medios_opts
     medios_opts3=medios_opts
