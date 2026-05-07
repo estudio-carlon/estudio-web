@@ -1032,7 +1032,7 @@ def panel():
     <h1 class="page-title">Panel General</h1>
     <p class="page-sub">Hola, <b>{session.get("display","")}</b> - {now_ar()}</p>
     {alertas}
-    <div style="display:flex;gap:12px;flex-wrap:wrap"><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Divisa Cmp</span><div id="dolar-cmp" style="font-size:.88rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Divisa Vta</span><div id="dolar-vta" style="font-size:.88rem;font-weight:600;color:var(--danger)">---</div></div><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Billete Cmp</span><div id="dolar-bil-cmp" style="font-size:.88rem;font-weight:600;color:var(--success)">---</div></div><div><span style="font-size:.58rem;font-weight:700;color:var(--muted);text-transform:uppercase">Billete Vta</span><div id="dolar-bil-vta" style="font-size:.88rem;font-weight:600;color:var(--danger)">---</div></div></div></div></div></div>
+    <div style="background:var(--card);border-radius:var(--r);padding:12px 20px;box-shadow:var(--shadow);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center"><div><span style="font-size:.62rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Dolar BNA Oficial</span><div style="display:flex;gap:14px;align-items:baseline;margin-top:2px"><div><span style="font-size:.63rem;color:var(--muted)">Divisa Cmp</span> <span id="dolar-cmp" style="font-weight:700;font-size:.95rem;color:var(--success)">---</span></div><div><span style="font-size:.63rem;color:var(--muted)">Divisa Vta</span> <span id="dolar-vta" style="font-weight:700;font-size:.95rem;color:var(--danger)">---</span></div><div><span style="font-size:.63rem;color:var(--muted)">Billete Cmp</span> <span id="dolar-bil-cmp" style="font-weight:700;font-size:.95rem;color:var(--success)">---</span></div><div><span style="font-size:.63rem;color:var(--muted)">Billete Vta</span> <span id="dolar-bil-vta" style="font-weight:700;font-size:.95rem;color:var(--danger)">---</span></div></div></div></div><div style="text-align:right"><div id="reloj" style="font-family:'DM Serif Display',serif;font-size:1.15rem;color:var(--primary);font-weight:600"></div><div id="fecha-hoy" style="font-size:.74rem;color:var(--muted)"></div></div></div>
     <script>
     // Reloj en tiempo real
     function tick(){{
@@ -1052,11 +1052,11 @@ def panel():
     fetch("https://dolarapi.com/v1/dolares/oficial")
       .then(r=>r.json())
       .then(d=>{{
-        document.getElementById("dolar-val").textContent="BNA Divisa";
+        
         document.getElementById("dolar-cmp").textContent="$"+d.compra.toLocaleString("es-AR",{{minimumFractionDigits:2}});
         document.getElementById("dolar-vta").textContent="$"+d.venta.toLocaleString("es-AR",{{minimumFractionDigits:2}});
       }})
-      .catch(()=>{{document.getElementById("dolar-val").textContent="Sin conexion";}});
+      .catch(()=>{{}});
     fetch("https://dolarapi.com/v1/dolares/bolsa")
       .then(r=>r.json())
       .then(d=>{{
