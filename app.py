@@ -2399,7 +2399,7 @@ def cuenta(id):
     if not cli: return "Cliente no encontrado",404
     nombre,cuit_enc,tel_enc,email_enc=cli
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
-    c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC",(id,))
+    c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY id DESC",(id,))
     datos=c.fetchall()
     # Historial - columnas nuevas opcionales
     try:
@@ -2414,6 +2414,7 @@ def cuenta(id):
         c3.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
         historial=c3.fetchall()
         c3.close()
+    conn.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
     telefono=(tel or "").replace(" ","").replace("+","").strip()
@@ -2473,8 +2474,9 @@ def cuenta(id):
     for h in historial:
         fact_b=('<span style="color:var(--success);font-size:.69rem;font-weight:700">Facturado</span>'
                 if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>')
+        if len(h) < 9: continue  # skip malformed rows
         emitido=h[7] or h[1]
-        pid=h[8]
+        pid=h[8] if len(h)>8 else 0
         btn_edit='<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>'
         concepto_p=h[9] if len(h)>9 and h[9] else "Honorarios mensuales"
         periodos_p=h[10] if len(h)>10 and h[10] else ""
