@@ -2399,7 +2399,7 @@ def cuenta(id):
     if not cli: return "Cliente no encontrado",404
     nombre,cuit_enc,tel_enc,email_enc=cli
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
-    c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY id DESC",(id,))
+    c.execute("SELECT periodo,COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s ORDER BY id DESC",(id,))
     datos=c.fetchall()
     # Historial - columnas nuevas opcionales
     try:
@@ -2481,16 +2481,16 @@ def cuenta(id):
         btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
         concepto_p=h[9] if h[9] else "Honorarios mensuales"
         periodos_p=h[10] if h[10] else ""
-        periodo_disp=h[2]+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else "")
+        periodo_disp=str(h[2] or '')+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else '')
         hist_rows+=(
             '<div class="logrow" style="justify-content:space-between;align-items:center">'
             +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
             +'<div class="log-dot"></div>'
-            +'<span class="log-time">'+str(h[0])+'</span>'
+            +'<span class="log-time">'+str(h[0] or '')+'</span>'
             +'<span class="log-user">'+emitido+'</span>'
             +'<span class="log-msg"><b>'+periodo_disp+'</b>'
             +(f' · <span style="color:var(--info);font-size:.75rem;font-weight:600">{concepto_p}</span>' if concepto_p!="Honorarios mensuales" else "")
-            +' · '+fmt(h[3])+' · '+str(h[4] or "")
+            +' · '+fmt(h[3] or 0)+' · '+str(h[4] or '')
             +(((" · "+str(h[6])) if h[6] else "")+' '+fact_b+'</span>')
             +'</div>'
             +btn_edit+'</div>')
@@ -2592,7 +2592,7 @@ def cuenta(id):
               <button class="btn btn-g">Emitir recibo</button>
             </form>
           </div>
-          <style>.regpanel{display:none}.regpanel.on{display:block}</style>
+          <style>.regpanel{{display:none}}.regpanel.on{{display:block}}</style>
           <script>
           function showRegTab(id,btn){{
             document.querySelectorAll(".regpanel").forEach(p=>p.classList.remove("on"));
