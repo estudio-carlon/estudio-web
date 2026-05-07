@@ -2401,13 +2401,19 @@ def cuenta(id):
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
     c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC",(id,))
     datos=c.fetchall()
-    # Try with new columns first, fallback to basic
+    # Historial - columnas nuevas opcionales
     try:
-        c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id,COALESCE(concepto,'Honorarios mensuales'),COALESCE(periodos_incluidos,'') FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
-    except:
-        conn.rollback()
-        c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
-    historial=c.fetchall();conn.close()
+        c2=conn.cursor()
+        c2.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id,COALESCE(concepto,'Honorarios mensuales'),COALESCE(periodos_incluidos,'') FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
+        historial=c2.fetchall()
+        c2.close()
+    except Exception:
+        try: conn.rollback()
+        except: pass
+        c3=conn.cursor()
+        c3.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
+        historial=c3.fetchall()
+        c3.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
     telefono=(tel or "").replace(" ","").replace("+","").strip()
