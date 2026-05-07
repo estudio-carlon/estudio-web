@@ -2453,16 +2453,16 @@ def cuenta(id):
         c3.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
         historial=c3.fetchall()
         c3.close()
+    # Obtener periodos que tienen al menos un pago registrado (antes de cerrar conn)
+    c4=conn.cursor()
+    c4.execute("SELECT DISTINCT periodo FROM pagos WHERE cliente_id=%s",(id,))
+    periodos_con_pago={row[0] for row in c4.fetchall()}
+    c4.close()
     conn.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
     telefono=(tel or "").replace(" ","").replace("+","").strip()
     filas=""
-    # Obtener periodos que tienen al menos un pago registrado
-    c4=conn.cursor()
-    c4.execute("SELECT DISTINCT periodo FROM pagos WHERE cliente_id=%s",(id,))
-    periodos_con_pago={row[0] for row in c4.fetchall()}
-    c4.close()
     for d in datos:
         saldo=d[1]-d[2]
         tiene_pago = d[0] in periodos_con_pago
