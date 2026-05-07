@@ -967,7 +967,7 @@ def panel_sec():
     tick();setInterval(tick,1000);
     </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
-    return page("Panel", body, "Clientes")
+    return page("Inicio", body, "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2346,8 +2346,13 @@ def cuenta(id):
                     if not c.fetchone():
                         c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(id,per_saldo,abs(saldo_manual)))
             conn.commit()
-            c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                      (id,periodos_sel[0],pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,periodos_str))
+            try:
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (id,periodos_sel[0],pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,periodos_str))
+            except:
+                conn.rollback()
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (id,periodos_sel[0],pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display","")))
             conn.commit()
             registrar_auditoria("PAGO MULTIPLE",f"Periodos:{periodos_str} | Total:{fmt(pago)} | {medio}",id,nombre_cli)
             flash=f'<div class="flash fok">Pago de {fmt(pago)} registrado por {n_per} periodos ({periodos_str})</div>'
@@ -2360,8 +2365,13 @@ def cuenta(id):
             if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(pago,id,periodo_uso))
             else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,periodo_uso,pago))
             conn.commit()
-            c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                      (id,periodo_uso,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,""))
+            try:
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (id,periodo_uso,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,""))
+            except:
+                conn.rollback()
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (id,periodo_uso,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display","")))
             conn.commit()
             registrar_auditoria("PAGO CONCEPTO",f"Concepto:{concepto} | {fmt(pago)} | {medio}",id,nombre_cli)
             flash=f'<div class="flash fok">{fmt(pago)} registrado — {concepto}</div>'
@@ -2374,8 +2384,13 @@ def cuenta(id):
             if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(pago,id,periodo))
             else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,periodo,pago))
             conn.commit()
-            c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                      (id,periodo,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,""))
+            try:
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (id,periodo,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display",""),concepto,""))
+            except:
+                conn.rollback()
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (id,periodo,pago,medio,obs,facturado,now_ar(),session.get("display",""),session.get("display","")))
             conn.commit()
             registrar_auditoria("PAGO REGISTRADO",f"Periodo:{periodo} | Monto:{fmt(pago)} | Medio:{medio}",id,nombre_cli)
             flash=f'<div class="flash fok">Pago de {fmt(pago)} registrado - {medio}</div>'
@@ -2386,7 +2401,12 @@ def cuenta(id):
     cuit=dec(cuit_enc);tel=dec(tel_enc);email=dec(email_enc)
     c.execute("SELECT periodo,debe,haber FROM cuentas WHERE cliente_id=%s ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC",(id,))
     datos=c.fetchall()
-    c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id,COALESCE(concepto,'Honorarios mensuales'),COALESCE(periodos_incluidos,'') FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
+    # Try with new columns first, fallback to basic
+    try:
+        c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id,COALESCE(concepto,'Honorarios mensuales'),COALESCE(periodos_incluidos,'') FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
+    except:
+        conn.rollback()
+        c.execute("SELECT fecha,usuario,periodo,monto,medio,facturado,observaciones,emitido_por,id FROM pagos WHERE cliente_id=%s ORDER BY id DESC LIMIT 30",(id,))
     historial=c.fetchall();conn.close()
     total_deuda=sum(max(d[1]-d[2],0) for d in datos);total_pago=sum(d[2] for d in datos)
     cuit_limpio=(cuit or "").replace("-","").replace(" ","")
@@ -2450,7 +2470,7 @@ def cuenta(id):
         emitido=h[7] or h[1]
         pid=h[8]
         btn_edit='<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>'
-        concepto_p=h[9] if len(h)>9 and h[9] else "Honorarios"
+        concepto_p=h[9] if len(h)>9 and h[9] else "Honorarios mensuales"
         periodos_p=h[10] if len(h)>10 and h[10] else ""
         periodo_disp=h[2]+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else "")
         hist_rows+=('<div class="logrow" style="justify-content:space-between;align-items:center">'
