@@ -1072,7 +1072,7 @@ def panel():
       <div class="scard g"><div class="sicon">&#x2705;</div><div class="slabel">Total Cobrado</div><div class="sval">{fmt(th)}</div></div>
       <div class="scard r"><div class="sicon">&#x1F534;</div><div class="slabel">Deuda Pendiente</div><div class="sval">{fmt(deuda)}</div></div>
       <div class="scard o"><div class="sicon">&#x1F4B8;</div><div class="slabel">Total Gastos</div><div class="sval">{fmt(tg)}</div></div>
-      <div class="scard {"g" if rend>=0 else "r"}"><div class="sicon">&#x1F4CA;</div><div class="slabel">Rendimiento Real</div><div class="sval">{fmt(rend)}</div></div>
+      <div class="scard {'g' if rend>=0 else 'r'}"><div class="sicon">&#x1F4CA;</div><div class="slabel">Rendimiento Real</div><div class="sval">{fmt(rend)}</div></div>
       <div class="scard b"><div class="sicon">&#x1F465;</div><div class="slabel">Clientes</div><div class="sval">{nc}</div></div>
     </div>
     <div class="fcard" style="margin-bottom:18px">
@@ -2870,7 +2870,7 @@ def cuenta(id):
       var url='/recibo_consolidado/'+_clienteId+'?periodos='+periodos+'&total='+total;
       var _base=_baseUrl;
       var msg='Estimado/a '+_waNom+', le enviamos su recibo consolidado de pago por los periodos '+periodos.replace(/-/g,'/').replace(/,/g,', ')+'. Puede verlo aqui: '+_base+url+' -- Estudio Contable Carlon';
-      window.open('https://wa.me/54'+_waTel.replace(/[^0-9]/g,'')+"?text="+encodeURIComponent(msg),'_blank');
+      window.open('https://wa.me/54'+_waTel.replace(/[^0-9]/g,'')+encodeURIComponent('?text=')+encodeURIComponent(msg),'_blank');
     }}
     function abrirPago(p,s){{
       document.getElementById('mp-sub').textContent=p+' - Saldo: $'+Math.round(s).toLocaleString('es-AR');
@@ -3184,8 +3184,8 @@ def caja():
                  FROM pagos p
                  JOIN clientes cl ON cl.id=p.cliente_id
                  LEFT JOIN cuentas cu ON cu.cliente_id=p.cliente_id AND cu.periodo=p.periodo
-                 WHERE p.fecha LIKE %s AND p.emitido_por=%s
-                 ORDER BY p.id DESC""",(f"%{fecha_hoy}%",usuario))
+                 WHERE p.fecha LIKE %s AND (p.emitido_por=%s OR p.emitido_por='sistema')
+                 ORDER BY p.id DESC""",(fecha_hoy+"%",usuario))
     cobros_dia=c.fetchall()
 
     if rol=="admin":
@@ -3707,6 +3707,33 @@ def ver_recibo_consolidado(cliente_id):
     conn.close()
 
     monto_total=total_real if total_real>0 else total_manual
+    # Registrar pagos en DB para cada periodo si no existen aun
+    medio_pago=request.args.get("medio","Transferencia -> Natasha Carlon")
+    if request.args.get("registrar","1")=="1":
+        c5=conn.cursor()
+        n_per=len([d for d in detalles if d[1]>0])
+        for per,monto in detalles:
+            if monto<=0: continue
+            # Check if pago already registered for this period
+            c5.execute("SELECT id FROM pagos WHERE cliente_id=%s AND periodo=%s AND monto=%s",(cliente_id,per,monto))
+            if not c5.fetchone():
+                # Update cuentas
+                c5.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+                if c5.fetchone():
+                    c5.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(monto,cliente_id,per))
+                else:
+                    c5.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(cliente_id,per,monto))
+                # Register pago
+                periodos_str=",".join(p for p,_ in detalles)
+                try:
+                    c5.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                               (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),"sistema","sistema","Honorarios mensuales",periodos_str))
+                except:
+                    conn.rollback()
+                    c5.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                               (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),"sistema","sistema"))
+        conn.commit()
+        c5.close()
     pdf=generar_pdf_consolidado(cliente_id,cli_nombre,cuit_cli,detalles,monto_total)
     dl=request.args.get("download")
     fname="recibo_consolidado_"+"_".join(p.replace("/","-") for p in periodos[:3])+".pdf"
