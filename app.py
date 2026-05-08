@@ -454,6 +454,17 @@ def init_db():
         usuario TEXT,asignado_a TEXT,estado TEXT DEFAULT 'pendiente',
         prioridad TEXT DEFAULT 'normal',fecha_creacion TEXT,
         fecha_actualizacion TEXT,fecha_vencimiento TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS empleados(
+        id SERIAL PRIMARY KEY,
+        cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+        nombre TEXT NOT NULL,
+        cuil TEXT,
+        categoria TEXT,
+        convenio TEXT,
+        fecha_ingreso TEXT,
+        activo BOOLEAN DEFAULT TRUE,
+        observaciones TEXT,
+        fecha_alta TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS seguridad_eventos(
         id SERIAL PRIMARY KEY,tipo TEXT,detalle TEXT,ip TEXT,
         usuario TEXT,fecha TEXT,resuelto BOOLEAN DEFAULT FALSE)""")
@@ -2703,6 +2714,7 @@ def cuenta(id):
     tel_disp=(tel or "---") if (tel or "").strip() not in ("","nan","NaN","None") else "---"
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Clientes</a>
+    <a href="/empleados/{id}" class="btn btn-p btn-sm">👷 Empleados</a>
     <h1 class="page-title">{nombre}</h1>
     <p class="page-sub">CUIT: {cuit or "---"} - Tel: {tel_disp} - {email or "---"}</p>
     <div class="stats" style="margin-bottom:16px">
@@ -4638,6 +4650,233 @@ def completar_tarea(tid):
     c.execute("UPDATE tareas SET estado='completada',fecha_actualizacion=%s WHERE id=%s",(now_ar(),tid))
     conn.commit();conn.close()
     return redirect(request.referrer or "/tareas")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  EMPLEADOS
+# ══════════════════════════════════════════════════════════════════════════════
+CONVENIOS = [
+    "Empleados de Comercio (130/75)",
+    "Transporte de Cargas / Camioneros (40/89)",
+    "Trabajadores Agropecuarios / UATRE (1/75)",
+    "Construccion (UOCRA)",
+    "Gastronómicos",
+    "Metalúrgicos (UOM)",
+    "Municipales",
+    "Docentes",
+    "Personal de Casas Particulares",
+    "Sin convenio / Fuera de convenio",
+    "Otro",
+]
+
+@app.route("/empleados/<int:cliente_id>", methods=["GET","POST"])
+@login_req
+def empleados(cliente_id):
+    conn=conectar();c=conn.cursor()
+    flash=""
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
+    cli=c.fetchone()
+    if not cli: conn.close(); return redirect("/clientes")
+    nombre_cli=cli[0]
+
+    if request.method=="POST":
+        accion=request.form.get("accion","")
+        if accion=="alta":
+            nombre_emp=request.form.get("nombre","").strip()
+            cuil=request.form.get("cuil","").strip()
+            categoria=request.form.get("categoria","").strip()
+            convenio=request.form.get("convenio","").strip()
+            fecha_ing=request.form.get("fecha_ingreso","").strip()
+            obs=request.form.get("observaciones","").strip()
+            if nombre_emp:
+                c.execute("""INSERT INTO empleados(cliente_id,nombre,cuil,categoria,convenio,
+                             fecha_ingreso,activo,observaciones,fecha_alta)
+                             VALUES(%s,%s,%s,%s,%s,%s,TRUE,%s,%s)""",
+                          (cliente_id,nombre_emp,enc(cuil),categoria,convenio,
+                           fecha_ing,obs,now_ar()))
+                conn.commit()
+                registrar_auditoria("ALTA EMPLEADO",f"{nombre_emp} | {convenio}",cliente_id,nombre_cli)
+                flash='<div class="flash fok">✅ Empleado registrado</div>'
+        elif accion=="baja":
+            emp_id=request.form.get("emp_id")
+            if emp_id:
+                c.execute("UPDATE empleados SET activo=FALSE WHERE id=%s AND cliente_id=%s",(emp_id,cliente_id))
+                conn.commit()
+                flash='<div class="flash fok">Empleado dado de baja</div>'
+        elif accion=="reactivar":
+            emp_id=request.form.get("emp_id")
+            if emp_id:
+                c.execute("UPDATE empleados SET activo=TRUE WHERE id=%s AND cliente_id=%s",(emp_id,cliente_id))
+                conn.commit()
+        elif accion=="editar":
+            emp_id=request.form.get("emp_id")
+            nombre_emp=request.form.get("nombre","").strip()
+            cuil=request.form.get("cuil","").strip()
+            categoria=request.form.get("categoria","").strip()
+            convenio=request.form.get("convenio","").strip()
+            fecha_ing=request.form.get("fecha_ingreso","").strip()
+            obs=request.form.get("observaciones","").strip()
+            if emp_id:
+                c.execute("""UPDATE empleados SET nombre=%s,cuil=%s,categoria=%s,convenio=%s,
+                             fecha_ingreso=%s,observaciones=%s WHERE id=%s AND cliente_id=%s""",
+                          (nombre_emp,enc(cuil),categoria,convenio,fecha_ing,obs,emp_id,cliente_id))
+                conn.commit()
+                flash='<div class="flash fok">✅ Empleado actualizado</div>'
+
+    # Get employees
+    c.execute("""SELECT id,nombre,cuil,categoria,convenio,fecha_ingreso,activo,observaciones
+                 FROM empleados WHERE cliente_id=%s ORDER BY activo DESC,nombre""",
+              (cliente_id,))
+    emps=c.fetchall()
+    conn.close()
+
+    tab=request.args.get("tab","activos")
+    activos=[e for e in emps if e[6]]
+    bajas=[e for e in emps if not e[6]]
+    lista=activos if tab=="activos" else bajas
+
+    conv_opts="".join(f'<option value="{cv}">{cv}</option>' for cv in CONVENIOS)
+
+    # Tabla empleados
+    filas=""
+    for e in lista:
+        eid,enombre,ecuil_enc,ecat,econv,efing,eact,eobs=e
+        ecuil=dec(ecuil_enc) if ecuil_enc else ""
+        cuil_limpio=(ecuil or "").replace("-","").replace(" ","")
+        # Link a ARCA constancia
+        arca_btn=(f'<a href="https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit={cuil_limpio}" target="_blank" class="btn btn-xs btn-arca" title="Constancia ARCA">ARCA</a>' if cuil_limpio else "")
+        # Badge convenio
+        conv_color={"Empleados de Comercio (130/75)":"#1A5276","Transporte de Cargas / Camioneros (40/89)":"#6E2F1A","Trabajadores Agropecuarios / UATRE (1/75)":"#1A6B2F"}.get(econv or "","#555")
+        conv_badge=(f'<span style="background:{conv_color};color:#fff;font-size:.65rem;padding:2px 6px;border-radius:4px;font-weight:600">{(econv or "Sin convenio").split(" (")[0][:20]}</span>' if econv else "")
+        # Action buttons
+        if eact:
+            btns=(f'<form method="post" style="display:inline"><input type=hidden name=accion value=baja><input type=hidden name=emp_id value={eid}>'                  f'<button class="btn btn-xs btn-o" onclick="return confirm(\'Dar de baja a {enombre}?\')">Dar de baja</button></form>')
+        else:
+            btns=(f'<form method="post" style="display:inline"><input type=hidden name=accion value=reactivar><input type=hidden name=emp_id value={eid}>'                  f'<button class="btn btn-xs btn-g">Reactivar</button></form>')
+        edit_btn=(f'<button class="btn btn-xs btn-p" onclick="editEmp({eid},\'{enombre}\',\'{ecuil}\',\'{ecat or ""}\',\'{econv or ""}\',\'{efing or ""}\',\'{(eobs or "").replace(chr(39),"")}\')" >✏️</button>')
+        filas+=(f'<tr><td style="font-weight:600">{enombre}</td>'                f'<td>{ecuil or "—"}</td>'                f'<td>{ecat or "—"}</td>'                f'<td>{conv_badge or (econv or "—")}</td>'                f'<td>{efing or "—"}</td>'                f'<td style="text-align:right">{arca_btn} {edit_btn} {btns}</td></tr>')
+
+    empty=f'<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Sin empleados {"activos" if tab=="activos" else "dados de baja"}</td></tr>'
+
+    body=f"""
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/cuenta/{cliente_id}" class="btn btn-o btn-sm">&larr; Volver a cuenta</a>
+      <h1 class="page-title" style="margin:0">Empleados — {nombre_cli}</h1>
+    </div>
+    {flash}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px" class="twocol">
+      <!-- Stats -->
+      <div class="fcard" style="margin-bottom:0">
+        <div class="stats" style="margin-bottom:0">
+          <div class="scard g" style="margin-bottom:0"><div class="slabel">Activos</div><div class="sval">{len(activos)}</div></div>
+          <div class="scard o" style="margin-bottom:0"><div class="slabel">Bajas</div><div class="sval">{len(bajas)}</div></div>
+          <div class="scard b" style="margin-bottom:0"><div class="slabel">Total</div><div class="sval">{len(emps)}</div></div>
+        </div>
+      </div>
+      <!-- Links sindicatos -->
+      <div class="fcard" style="margin-bottom:0">
+        <div style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Links sindicatos y escalas</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <a href="https://jorgevega.com.ar/laboral/71-empleados-comercio-escala-salarial-2016-2017.html" target="_blank" class="btn btn-xs btn-o">Escala Comercio</a>
+          <a href="https://www.online.faecys.org.ar/Inicio.aspx" target="_blank" class="btn btn-xs btn-o">FAECYS</a>
+          <a href="https://www.sasweb.com.ar/usuarios/login" target="_blank" class="btn btn-xs btn-o">Sind. Comercio SGO</a>
+          <a href="https://www.camioneros-ba.org.ar/index.php/gremiales/salarios/escalas-salariales" target="_blank" class="btn btn-xs btn-o">Escala Camioneros</a>
+          <a href="https://federacion.impresiondeboletas.com.ar/login.aspx" target="_blank" class="btn btn-xs btn-o">Sind. Camioneros Nac.</a>
+          <a href="http://camioneros.sirwiq.com/Login/Acceso" target="_blank" class="btn btn-xs btn-o">Camioneros SGO</a>
+          <a href="https://www.ignacioonline.com.ar/paritaria-agrarios-escalas-salariales-marzo-abril-y-junio-2026-uatre/" target="_blank" class="btn btn-xs btn-o">Escala Agro 2026</a>
+          <a href="https://portal.renatre.org.ar/" target="_blank" class="btn btn-xs btn-o">RENATRE</a>
+          <a href="https://apps.uatre.org.ar/usupe/signin.aspx" target="_blank" class="btn btn-xs btn-o">UATRE SGO</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs activos/bajas -->
+    <div class="tabs" style="margin-bottom:14px">
+      <a href="/empleados/{cliente_id}?tab=activos" class="tab {"on" if tab=="activos" else ""}" style="text-decoration:none">👷 Activos ({len(activos)})</a>
+      <a href="/empleados/{cliente_id}?tab=bajas" class="tab {"on" if tab=="bajas" else ""}" style="text-decoration:none">📋 Bajas ({len(bajas)})</a>
+    </div>
+
+    <!-- Tabla -->
+    <div class="fcard" style="margin-bottom:16px;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.84rem">
+        <thead>
+          <tr style="background:var(--primary);color:#fff">
+            <th style="padding:8px 12px;text-align:left">Nombre</th>
+            <th style="padding:8px 12px;text-align:left">CUIL</th>
+            <th style="padding:8px 12px;text-align:left">Categoría</th>
+            <th style="padding:8px 12px;text-align:left">Convenio</th>
+            <th style="padding:8px 12px;text-align:left">Ingreso</th>
+            <th style="padding:8px 12px;text-align:right">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas or empty}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Formulario alta -->
+    <div class="fcard" id="form-alta">
+      <h3>➕ Agregar empleado</h3>
+      <form method="post">
+        <input type="hidden" name="accion" value="alta">
+        <div class="fgrid">
+          <div class="fg"><label>Nombre completo *</label><input name="nombre" required placeholder="Apellido, Nombre"></div>
+          <div class="fg"><label>CUIL</label><input name="cuil" placeholder="20-12345678-9"></div>
+          <div class="fg"><label>Categoría</label><input name="categoria" placeholder="Ej: Cajero A, Chofer, Peón"></div>
+          <div class="fg"><label>Convenio</label><select name="convenio"><option value="">Sin especificar</option>{conv_opts}</select></div>
+          <div class="fg"><label>Fecha de ingreso</label><input name="fecha_ingreso" type="date"></div>
+          <div class="fg"><label>Observaciones</label><input name="observaciones" placeholder="Opcional"></div>
+        </div>
+        <button class="btn btn-g">Registrar empleado</button>
+      </form>
+    </div>
+
+    <!-- Modal editar -->
+    <div id="modal-emp" class="mo" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center">
+      <div style="background:var(--card);border-radius:var(--r);padding:24px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto">
+        <h3>✏️ Editar empleado</h3>
+        <form method="post">
+          <input type="hidden" name="accion" value="editar">
+          <input type="hidden" name="emp_id" id="edit-id">
+          <div class="fgrid">
+            <div class="fg"><label>Nombre *</label><input name="nombre" id="edit-nombre" required></div>
+            <div class="fg"><label>CUIL</label><input name="cuil" id="edit-cuil"></div>
+            <div class="fg"><label>Categoría</label><input name="categoria" id="edit-cat"></div>
+            <div class="fg"><label>Convenio</label><select name="convenio" id="edit-conv"><option value="">Sin especificar</option>{conv_opts}</select></div>
+            <div class="fg"><label>Fecha ingreso</label><input name="fecha_ingreso" id="edit-ing" type="date"></div>
+            <div class="fg"><label>Observaciones</label><input name="observaciones" id="edit-obs"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button type="button" onclick="document.getElementById('modal-emp').style.display='none'" class="btn btn-o">Cancelar</button>
+            <button type="submit" class="btn btn-a">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+    function editEmp(id,nom,cuil,cat,conv,ing,obs){{
+      document.getElementById('edit-id').value=id;
+      document.getElementById('edit-nombre').value=nom;
+      document.getElementById('edit-cuil').value=cuil;
+      document.getElementById('edit-cat').value=cat;
+      var sel=document.getElementById('edit-conv');
+      for(var i=0;i<sel.options.length;i++){{
+        if(sel.options[i].value===conv){{sel.selectedIndex=i;break;}}
+      }}
+      document.getElementById('edit-ing').value=ing;
+      document.getElementById('edit-obs').value=obs;
+      document.getElementById('modal-emp').style.display='flex';
+    }}
+    document.getElementById('modal-emp').addEventListener('click',function(e){{
+      if(e.target===this) this.style.display='none';
+    }});
+    </script>
+    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>
+    """
+    return page(f"Empleados — {nombre_cli}", body, "Clientes")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
