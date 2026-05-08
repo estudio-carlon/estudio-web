@@ -2386,6 +2386,7 @@ def registrar_periodos(cliente_id):
     hasta=request.form.get("hasta","").strip()  # MM/YYYY
     monto_unitario=float(request.form.get("monto",0) or 0)
     medio=request.form.get("medio","Transferencia -> Natasha Carlon")
+    es_historico = request.form.get("es_historico","0") == "1"
     if not desde or not hasta or monto_unitario<=0:
         return redirect(f"/cuenta/{cliente_id}")
     
@@ -2420,12 +2421,15 @@ def registrar_periodos(cliente_id):
         c.execute("SELECT id FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
         if not c.fetchone():
             try:
+                fecha_ins = "01/01/2000 00:00:00" if es_historico else now_ar()
+                obs_ins = "Saldo inicial historico" if es_historico else "Registro masivo"
                 c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                          (cliente_id,per,monto_unitario,medio,"Registro historico masivo",False,now_ar(),session.get("display","admin"),session.get("display","admin"),"Honorarios mensuales"))
+                          (cliente_id,per,monto_unitario,medio,obs_ins,False,fecha_ins,session.get("display","sistema"),session.get("display","sistema"),"Honorarios mensuales"))
             except:
                 conn.rollback()
+                fecha_ins = "01/01/2000 00:00:00" if es_historico else now_ar()
                 c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                          (cliente_id,per,monto_unitario,medio,"Registro historico masivo",False,now_ar(),session.get("display","admin"),session.get("display","admin")))
+                          (cliente_id,per,monto_unitario,medio,"Saldo inicial" if es_historico else "Masivo",False,fecha_ins,session.get("display","sistema"),session.get("display","sistema")))
         registrados+=1
     
     conn.commit()
@@ -2739,7 +2743,11 @@ def cuenta(id):
         '<div class="fg" style="flex:1;min-width:100px"><label>Hasta</label><input name="hasta" placeholder="MM/AAAA" value="'+datetime.now().strftime("%m/%Y")+'"></div>'
         '<div class="fg" style="flex:1;min-width:100px"><label>Monto por período $</label><input name="monto" type="number" value="'+str(int(abono_cli or 0))+'"></div>'
         '<div class="fg" style="flex:1;min-width:120px"><label>Medio</label><select name="medio">'+medios_opts+'</select></div>'
-        '<button class="btn btn-o btn-sm" style="margin-bottom:4px" onclick="return confirm(\'Registrar todos los periodos del rango?\')">Registrar rango</button>'
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+        '<input type="checkbox" name="es_historico" value="1" id="chk-hist" checked style="width:auto">'
+        '<label for="chk-hist" style="font-size:.82rem;font-weight:600;color:var(--warning);text-transform:none;cursor:pointer">'
+        'Es registro histórico (NO suma a caja del día)</label></div>'
+        '<button class="btn btn-o btn-sm" onclick="return confirm(\'Registrar todos los periodos del rango?\')">Registrar rango</button>'
         '</div></form></div>' if True else ""}
         <div class="fcard">
           <h3>Registrar Pago</h3>
