@@ -3223,7 +3223,7 @@ MEDIOS_CAJA = [
 
 def _totales_caja(fecha_hoy, usuario):
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT medio,SUM(monto) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s GROUP BY medio",
+    c.execute("SELECT medio,SUM(monto) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s AND fecha NOT LIKE '%%01/01/2000%%' GROUP BY medio",
               (f"%{fecha_hoy}%", usuario))
     filas=c.fetchall(); conn.close()
     tot = {k[0]:0.0 for k in MEDIOS_CAJA}
@@ -3299,7 +3299,12 @@ def caja():
 
     tot_hoy=_totales_caja(fecha_hoy,usuario)
     c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s AND cerrado=TRUE",(fecha_hoy,usuario))
-    ya_cerro=bool(c.fetchone())
+    _cierre_row=c.fetchone()
+    # Also check if there are real pagos today by this user
+    c.execute("SELECT COUNT(*) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s AND fecha NOT LIKE '%%2000%%'",(fecha_hoy+"%",usuario))
+    _pagos_hoy=c.fetchone()[0]
+    # Caja is only "cerrada" if there was a closure AND it was done today
+    ya_cerro=bool(_cierre_row)
 
     # Cobros del dia con saldo
     c.execute("""SELECT cl.nombre,p.periodo,p.monto,p.medio,p.observaciones,
@@ -3307,7 +3312,8 @@ def caja():
                  FROM pagos p
                  JOIN clientes cl ON cl.id=p.cliente_id
                  LEFT JOIN cuentas cu ON cu.cliente_id=p.cliente_id AND cu.periodo=p.periodo
-                 WHERE p.fecha LIKE %s AND (p.emitido_por=%s OR p.emitido_por='sistema')
+                 WHERE p.fecha LIKE %s AND p.emitido_por=%s
+                 AND p.fecha NOT LIKE '%2000%'
                  ORDER BY p.id DESC""",(fecha_hoy+"%",usuario))
     cobros_dia=c.fetchall()
 
