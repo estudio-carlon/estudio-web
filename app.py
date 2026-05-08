@@ -387,9 +387,9 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades")]
+    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -454,6 +454,19 @@ def init_db():
         usuario TEXT,asignado_a TEXT,estado TEXT DEFAULT 'pendiente',
         prioridad TEXT DEFAULT 'normal',fecha_creacion TEXT,
         fecha_actualizacion TEXT,fecha_vencimiento TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS sueldos_estado(
+        id SERIAL PRIMARY KEY,
+        cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
+        mes INTEGER NOT NULL,
+        anio INTEGER NOT NULL,
+        estado_recibo TEXT DEFAULT 'pendiente',
+        estado_931 TEXT DEFAULT 'pendiente',
+        estado_vep TEXT DEFAULT 'pendiente',
+        fecha_vto_931 TEXT,
+        observaciones TEXT,
+        fecha_actualizacion TEXT,
+        usuario TEXT,
+        UNIQUE(cliente_id,mes,anio))""")
     c.execute("""CREATE TABLE IF NOT EXISTS empleados(
         id SERIAL PRIMARY KEY,
         cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
@@ -842,6 +855,15 @@ def panel_sec():
 
     # Vencimientos del mes
     c.execute("SELECT vencimiento_id,estado FROM agenda_vencimientos WHERE mes=%s AND anio=%s",(mes,anio))
+    # F.931 vencimientos from clients with employees
+    c.execute("""SELECT cl.nombre,cl.cuit,se.estado_931,se.estado_vep
+                 FROM clientes cl
+                 JOIN empleados e ON e.cliente_id=cl.id AND e.activo=TRUE
+                 LEFT JOIN sueldos_estado se ON se.cliente_id=cl.id AND se.mes=%s AND se.anio=%s
+                 WHERE cl.activo IS NOT FALSE
+                 GROUP BY cl.id,cl.nombre,cl.cuit,se.estado_931,se.estado_vep
+                 ORDER BY cl.nombre""",(mes,anio))
+    clientes_con_sueldos=c.fetchall()
     venc_estados={r[0]:r[1] for r in c.fetchall()}
     proximos=[]
     for v in VENCIMIENTOS_IMPOSITIVOS:
@@ -3325,7 +3347,7 @@ def caja():
                  JOIN clientes cl ON cl.id=p.cliente_id
                  LEFT JOIN cuentas cu ON cu.cliente_id=p.cliente_id AND cu.periodo=p.periodo
                  WHERE p.fecha LIKE %s AND p.emitido_por=%s
-                 AND p.fecha NOT LIKE '%2000%'
+                 AND p.fecha NOT LIKE '%%2000%%'
                  ORDER BY p.id DESC""",(fecha_hoy+"%",usuario))
     cobros_dia=c.fetchall()
 
@@ -4877,6 +4899,236 @@ def empleados(cliente_id):
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>
     """
     return page(f"Empleados — {nombre_cli}", body, "Clientes")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SUELDOS Y 931
+# ══════════════════════════════════════════════════════════════════════════════
+def vto_931(cuit_str, mes, anio):
+    """Calcula vencimiento F.931 según terminación de CUIT"""
+    try:
+        cuit_limpio = (cuit_str or "").replace("-","").replace(" ","")
+        terminacion = int(cuit_limpio[-1]) if cuit_limpio else 0
+        dias = {0:13,1:13,2:14,3:14,4:15,5:15,6:16,7:16,8:17,9:17}
+        dia_vto = dias.get(terminacion, 15)
+        # Vence el mes siguiente
+        mes_vto = mes + 1 if mes < 12 else 1
+        anio_vto = anio if mes < 12 else anio + 1
+        return f"{dia_vto:02d}/{mes_vto:02d}/{anio_vto}"
+    except:
+        return "—"
+
+@app.route("/sueldos", methods=["GET","POST"])
+@login_req
+def sueldos():
+    conn = conectar(); c = conn.cursor()
+    flash = ""
+    hoy = datetime.now()
+    mes = int(request.args.get("mes", hoy.month))
+    anio = int(request.args.get("anio", hoy.year))
+
+    if request.method == "POST":
+        accion = request.form.get("accion","")
+        cliente_id = request.form.get("cliente_id")
+        est_rec = request.form.get("estado_recibo","pendiente")
+        est_931 = request.form.get("estado_931","pendiente")
+        est_vep = request.form.get("estado_vep","pendiente")
+        obs = request.form.get("observaciones","").strip()
+        if accion == "guardar" and cliente_id:
+            c.execute("""INSERT INTO sueldos_estado(cliente_id,mes,anio,estado_recibo,estado_931,
+                         estado_vep,observaciones,fecha_actualizacion,usuario)
+                         VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         ON CONFLICT(cliente_id,mes,anio) DO UPDATE SET
+                         estado_recibo=EXCLUDED.estado_recibo,
+                         estado_931=EXCLUDED.estado_931,
+                         estado_vep=EXCLUDED.estado_vep,
+                         observaciones=EXCLUDED.observaciones,
+                         fecha_actualizacion=EXCLUDED.fecha_actualizacion,
+                         usuario=EXCLUDED.usuario""",
+                      (cliente_id,mes,anio,est_rec,est_931,est_vep,obs,now_ar(),
+                       session.get("display","")))
+            conn.commit()
+            flash = '<div class="flash fok">✅ Estado actualizado</div>'
+
+    # Get all clients WITH employees
+    c.execute("""SELECT DISTINCT cl.id, cl.nombre, cl.cuit,
+                        COUNT(e.id) as n_emp
+                 FROM clientes cl
+                 JOIN empleados e ON e.cliente_id=cl.id AND e.activo=TRUE
+                 WHERE cl.activo IS NOT FALSE
+                 GROUP BY cl.id, cl.nombre, cl.cuit
+                 ORDER BY cl.nombre""")
+    clientes_con_emp = c.fetchall()
+
+    # Get estados for this month
+    c.execute("""SELECT cliente_id,estado_recibo,estado_931,estado_vep,observaciones
+                 FROM sueldos_estado WHERE mes=%s AND anio=%s""", (mes, anio))
+    estados = {r[0]: r[1:] for r in c.fetchall()}
+    conn.close()
+
+    # Build navigation months
+    meses_nav = ""
+    for m in range(1,13):
+        sel = "font-weight:700;color:var(--primary)" if m==mes else "color:var(--muted)"
+        meses_nav += f'<a href="/sueldos?mes={m}&anio={anio}" style="text-decoration:none;font-size:.82rem;padding:4px 8px;border-radius:4px;{sel}">{["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][m]}</a>'
+
+    years_nav = ""
+    for y in [anio-1, anio, anio+1]:
+        sel = "background:var(--primary);color:#fff" if y==anio else "background:var(--bg);color:var(--text)"
+        years_nav += f'<a href="/sueldos?mes={mes}&anio={y}" style="text-decoration:none;font-size:.82rem;padding:3px 10px;border-radius:4px;{sel}">{y}</a>'
+
+    # Stats
+    total = len(clientes_con_emp)
+    rec_ok = sum(1 for cid,*_ in clientes_con_emp if estados.get(cid,("","",""))[0]=="presentado")
+    f931_ok = sum(1 for cid,*_ in clientes_con_emp if estados.get(cid,("","",""))[1]=="presentado")
+    vep_ok = sum(1 for cid,*_ in clientes_con_emp if estados.get(cid,("","",""))[2]=="generado")
+
+    # Badge helper
+    def badge_est(val, tipo):
+        if tipo == "recibo":
+            opts = [("pendiente","⏳ Pendiente","#888"),("borrador","📝 Borrador","#E67E22"),
+                    ("presentado","✅ Presentado","#27AE60")]
+        elif tipo == "931":
+            opts = [("pendiente","⏳ Pendiente","#888"),("borrador","📝 Borrador","#E67E22"),
+                    ("presentado","✅ Presentado","#27AE60")]
+        else:  # vep
+            opts = [("pendiente","⏳ Pendiente","#888"),("generado","💳 Generado","#1A5276"),
+                    ("pagado","✅ Pagado","#27AE60")]
+        for k,lbl,col in opts:
+            if val==k:
+                return f'<span style="background:{col};color:#fff;font-size:.68rem;padding:2px 7px;border-radius:4px;font-weight:600;white-space:nowrap">{lbl}</span>'
+        return ""
+
+    # Build rows
+    filas = ""
+    mes_nombre = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][mes]
+
+    for cid, cnombre, ccuit_enc, n_emp in clientes_con_emp:
+        ccuit = dec(ccuit_enc) if ccuit_enc else ""
+        cuit_limpio = (ccuit or "").replace("-","").replace(" ","")
+        est = estados.get(cid, ("pendiente","pendiente","pendiente",""))
+        est_rec, est_931, est_vep = est[0], est[1], est[2]
+        obs_val = est[3] if len(est)>3 else ""
+        vto = vto_931(ccuit, mes, anio)
+
+        # Row color by status
+        if est_rec=="presentado" and est_931=="presentado" and est_vep in ("generado","pagado"):
+            row_bg = "rgba(39,174,96,.06)"
+        elif est_rec=="pendiente" and est_931=="pendiente":
+            row_bg = "rgba(231,76,60,.04)"
+        else:
+            row_bg = "transparent"
+
+        # Select options
+        def sel_rec(v): return "selected" if est_rec==v else ""
+        def sel_931(v): return "selected" if est_931==v else ""
+        def sel_vep(v): return "selected" if est_vep==v else ""
+
+        filas += f'''<tr style="background:{row_bg};border-bottom:1px solid var(--border)">
+          <td style="padding:8px 10px">
+            <div style="font-weight:600;font-size:.85rem">{cnombre}</div>
+            <div style="font-size:.7rem;color:var(--muted)">{n_emp} emp · CUIT: {ccuit or "—"}</div>
+          </td>
+          <td style="padding:8px 6px;text-align:center">
+            <form method="post" style="display:inline" onchange="this.submit()">
+              <input type=hidden name=accion value=guardar>
+              <input type=hidden name=cliente_id value={cid}>
+              <input type=hidden name=estado_931 value="{est_931}">
+              <input type=hidden name=estado_vep value="{est_vep}">
+              <input type=hidden name=observaciones value="{obs_val}">
+              <select name="estado_recibo" style="font-size:.75rem;padding:3px 5px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg)">
+                <option value="pendiente" {sel_rec("pendiente")}>⏳ Pendiente</option>
+                <option value="borrador" {sel_rec("borrador")}>📝 Borrador</option>
+                <option value="presentado" {sel_rec("presentado")}>✅ Presentado</option>
+              </select>
+            </form>
+          </td>
+          <td style="padding:8px 6px;text-align:center">
+            <form method="post" style="display:inline" onchange="this.submit()">
+              <input type=hidden name=accion value=guardar>
+              <input type=hidden name=cliente_id value={cid}>
+              <input type=hidden name=estado_recibo value="{est_rec}">
+              <input type=hidden name=estado_vep value="{est_vep}">
+              <input type=hidden name=observaciones value="{obs_val}">
+              <select name="estado_931" style="font-size:.75rem;padding:3px 5px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg)">
+                <option value="pendiente" {sel_931("pendiente")}>⏳ Pendiente</option>
+                <option value="borrador" {sel_931("borrador")}>📝 Borrador</option>
+                <option value="presentado" {sel_931("presentado")}>✅ Presentado</option>
+              </select>
+            </form>
+            <div style="font-size:.65rem;color:var(--muted);margin-top:2px">Vto: {vto}</div>
+          </td>
+          <td style="padding:8px 6px;text-align:center">
+            <form method="post" style="display:inline" onchange="this.submit()">
+              <input type=hidden name=accion value=guardar>
+              <input type=hidden name=cliente_id value={cid}>
+              <input type=hidden name=estado_recibo value="{est_rec}">
+              <input type=hidden name=estado_931 value="{est_931}">
+              <input type=hidden name=observaciones value="{obs_val}">
+              <select name="estado_vep" style="font-size:.75rem;padding:3px 5px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg)">
+                <option value="pendiente" {sel_vep("pendiente")}>⏳ Pendiente</option>
+                <option value="generado" {sel_vep("generado")}>💳 Generado</option>
+                <option value="pagado" {sel_vep("pagado")}>✅ Pagado</option>
+              </select>
+            </form>
+          </td>
+          <td style="padding:8px 6px">
+            <a href="/empleados/{cid}" class="btn btn-xs btn-o" title="Ver empleados">👷 {n_emp}</a>
+          </td>
+        </tr>'''
+
+    empty = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">No hay clientes con empleados activos registrados</td></tr>'
+
+    body = f"""
+    <h1 class="page-title">Control Sueldos y F.931</h1>
+    <p class="page-sub">Solo clientes con empleados registrados</p>
+    {flash}
+
+    <!-- Navegacion mes/año -->
+    <div class="fcard" style="margin-bottom:14px;padding:10px 16px">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px">{years_nav}</div>
+        <div style="display:flex;gap:2px;flex-wrap:wrap">{meses_nav}</div>
+        <div style="margin-left:auto;font-size:.85rem;font-weight:700;color:var(--primary)">{mes_nombre} {anio}</div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats" style="margin-bottom:16px">
+      <div class="scard b"><div class="sicon">👷</div><div class="slabel">Clientes con empleados</div><div class="sval">{total}</div></div>
+      <div class="scard g"><div class="sicon">📄</div><div class="slabel">Recibos presentados</div><div class="sval">{rec_ok}/{total}</div></div>
+      <div class="scard o"><div class="sicon">📋</div><div class="slabel">F.931 presentados</div><div class="sval">{f931_ok}/{total}</div></div>
+      <div class="scard p" style="--scard-c:var(--info)"><div class="sicon">💳</div><div class="slabel">VEP generados</div><div class="sval">{vep_ok}/{total}</div></div>
+    </div>
+
+    <!-- Info -->
+    <div class="info-box" style="margin-bottom:14px;font-size:.8rem">
+      💡 El estado se guarda automáticamente al cambiar el selector. El vencimiento F.931 se calcula según terminación del CUIT del cliente.
+    </div>
+
+    <!-- Tabla -->
+    <div class="fcard" style="overflow-x:auto;padding:0">
+      <table style="width:100%;border-collapse:collapse;font-size:.84rem">
+        <thead>
+          <tr style="background:var(--primary);color:#fff">
+            <th style="padding:10px 12px;text-align:left">Cliente</th>
+            <th style="padding:10px 8px;text-align:center;min-width:130px">Recibo sueldo</th>
+            <th style="padding:10px 8px;text-align:center;min-width:140px">F.931 / Sindicato</th>
+            <th style="padding:10px 8px;text-align:center;min-width:120px">VEP pago</th>
+            <th style="padding:10px 8px;text-align:center">Empleados</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas if clientes_con_emp else empty}
+        </tbody>
+      </table>
+    </div>
+    <style>
+    .scard.p {{ border-left:4px solid var(--info) !important }}
+    </style>
+    """
+    return page("Sueldos y F.931", body, "Clientes")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
