@@ -993,7 +993,7 @@ def panel():
     # Alertas de seguridad sin resolver
     c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE resuelto=FALSE AND tipo IN ('BLOQUEO_IP','ACCESO_PAIS_BLOQUEADO','LOGIN_FALLIDO')");alertas_sec=c.fetchone()[0]
     # Datos para gráficos
-    c.execute("SELECT periodo,COALESCE(SUM(haber),0) FROM cuentas GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC LIMIT 8")
+    c.execute("SELECT periodo,COALESCE(SUM(haber),0) FROM cuentas WHERE periodo ~ '^[0-9]{{2}}/[0-9]{{4}}$' GROUP BY periodo ORDER BY SPLIT_PART(periodo,'/',2) DESC,SPLIT_PART(periodo,'/',1) DESC LIMIT 8")
     raw_ing=list(reversed(c.fetchall()))
     periodos=[r[0] for r in raw_ing];ingresos_m=[float(r[1]) for r in raw_ing]
     gastos_m=[]
@@ -1012,9 +1012,9 @@ def panel():
     cum_ing,cum_gas=[],[]; si,sg=0.0,0.0
     for i in range(len(ingresos_m)):
         si+=ingresos_m[i];sg+=gastos_m[i];cum_ing.append(round(si));cum_gas.append(round(sg))
-    c.execute("SELECT cl.nombre,SUM(cu.debe-cu.haber) d FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id GROUP BY cl.nombre HAVING SUM(cu.debe-cu.haber)>0 ORDER BY d DESC LIMIT 6")
+    c.execute("SELECT cl.nombre,SUM(COALESCE(cu.debe,0)-COALESCE(cu.haber,0)) d FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id WHERE cl.activo IS NOT FALSE GROUP BY cl.nombre HAVING SUM(COALESCE(cu.debe,0)-COALESCE(cu.haber,0))>0 ORDER BY d DESC LIMIT 6")
     top=c.fetchall()
-    c.execute("SELECT fecha,usuario,accion,detalle,cliente_nombre FROM auditoria ORDER BY id DESC LIMIT 8")
+    c.execute("SELECT COALESCE(fecha,''),COALESCE(usuario,''),COALESCE(accion,''),COALESCE(detalle,''),cliente_nombre FROM auditoria ORDER BY id DESC LIMIT 8")
     actividad=c.fetchall();conn.close()
     deuda=td-th;rend=th-tg;pct=int(th/td*100) if td>0 else 0
     total_s=cobro_nat+cobro_mai;pct_nat=int(cobro_nat/total_s*100) if total_s>0 else 50;pct_mai=100-pct_nat
@@ -1026,8 +1026,17 @@ def panel():
     if alertas_sec>0:
         alertas+=f'<div class="sec-alert">🔴 <b>{alertas_sec}</b> alerta(s) de seguridad pendientes · <a href="/seguridad" style="color:#7a1a1a;font-weight:600">Ver seguridad</a></div>'
     mx_deu=top[0][1] if top else 1
-    barras_deu="".join(f'<div class="chartrow"><span class="cl" title="{n}">{n}</span><div class="cbg"><div class="cfill" style="width:{int(s/mx_deu*100)}%"></div></div><span class="cv">{fmt(s)}</span></div>' for n,s in top) or '<p style="color:var(--muted);font-size:.84rem;padding:12px 0">Sin deudores</p>'
-    act_html="".join(f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{a[0]}</span><span class="log-user">{a[1]}</span><span class="log-msg"><b>{a[2]}</b> - {a[3]}{" · "+a[4] if a[4] else ""}</span></div>' for a in actividad) or '<p style="color:var(--muted);font-size:.84rem;padding:10px 0">Sin actividad</p>'
+    barras_deu="".join(
+        '<div class="chartrow"><span class="cl">'+str(n or "?")+'</span>'
+        '<div class="cbg"><div class="cfill" style="width:'+str(int(float(s or 0)/mx_deu*100))+'%"></div></div>'
+        '<span class="cv">'+fmt(s or 0)+'</span></div>'
+        for n,s in top if s
+    ) or '<p style="color:var(--muted);font-size:.84rem;padding:12px 0">Sin deudores</p>'
+    _act_rows=[]
+    for a in actividad:
+        a = tuple(a) + (None,) * (5 - len(a))
+        _act_rows.append(f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{a[0]}</span><span class="log-user">{a[1]}</span><span class="log-msg"><b>{a[2]}</b> - {a[3]}{" · "+a[4] if a[4] else ""}</span></div>')
+    act_html="".join(_act_rows) or '<p style="color:var(--muted);font-size:.84rem;padding:10px 0">Sin actividad</p>'
     body=f"""
     <h1 class="page-title">Panel General</h1>
     <p class="page-sub">Hola, <b>{session.get("display","")}</b> - {now_ar()}</p>
