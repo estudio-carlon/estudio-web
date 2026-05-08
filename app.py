@@ -2297,21 +2297,41 @@ def borrar_cliente(id):
     c.execute("DELETE FROM cuentas WHERE cliente_id=%s",(id,));c.execute("DELETE FROM pagos WHERE cliente_id=%s",(id,));c.execute("DELETE FROM clientes WHERE id=%s",(id,))
     conn.commit();conn.close();registrar_auditoria("BAJA CLIENTE","Cliente eliminado",id,nombre);return redirect("/clientes")
 
+
+@app.route("/borrar_pagos_masivo/<int:cliente_id>", methods=["POST"])
+@login_req
+def borrar_pagos_masivo(cliente_id):
+    """Elimina multiples periodos de una vez"""
+    periodos_raw=request.form.get("periodos_borrar","")
+    if not periodos_raw:
+        return redirect(f"/cuenta/{cliente_id}")
+    periodos=[p.replace("-","/").strip() for p in periodos_raw.split(",") if p.strip()]
+    conn=conectar();c=conn.cursor()
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
+    row=c.fetchone(); nombre=row[0] if row else "?"
+    eliminados=0
+    for per in periodos:
+        c.execute("DELETE FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        c.execute("DELETE FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        eliminados+=1
+    conn.commit();conn.close()
+    registrar_auditoria("BORRAR_MASIVO",f"Eliminados {eliminados} periodos: {','.join(periodos[:5])}",cliente_id,nombre)
+    return redirect(f"/cuenta/{cliente_id}")
+
 @app.route("/borrar_pago/<int:cliente_id>/<path:periodo>")
-@admin_req
+@login_req
 def borrar_pago(cliente_id, periodo):
     periodo = periodo.replace("-","/")
     conn=conectar();c=conn.cursor()
     c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
     row=c.fetchone(); nombre=row[0] if row else "?"
-    # Restar del haber lo que se habia cobrado en ese periodo
     c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
     total_pago=c.fetchone()[0]
+    # Delete pagos and reset cuentas
     c.execute("DELETE FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
-    c.execute("UPDATE cuentas SET haber=GREATEST(COALESCE(haber,0)-%s,0) WHERE cliente_id=%s AND periodo=%s",
-              (total_pago,cliente_id,periodo))
+    c.execute("DELETE FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
     conn.commit();conn.close()
-    registrar_auditoria("BORRAR_PAGO",f"Eliminado pago de {fmt(total_pago)} periodo {periodo}",cliente_id,nombre)
+    registrar_auditoria("BORRAR_PAGO",f"Eliminado pago {fmt(total_pago)} periodo {periodo}",cliente_id,nombre)
     return redirect(f"/cuenta/{cliente_id}")
 
 @app.route("/editar_pago", methods=["POST"])
@@ -2563,7 +2583,7 @@ def cuenta(id):
                 +' class="btn btn-xs btn-wa waBtn">WA</button>')
         else:
             bw=""
-        bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar pago de '+d[0]+'?\')" title="Eliminar">🗑</a>' if session.get('rol')=='admin' else '')
+        bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar pago de '+str(d[0])+'?\')" title="Eliminar">🗑</a>')
         # link recibo publico para compartir
         _base=os.getenv('BASE_URL','https://estudio-web-1.onrender.com')
         recibo_url=_base+'/recibo/'+str(id)+'/'+per_esc
@@ -2697,10 +2717,14 @@ def cuenta(id):
     </div>
     <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start" class="twocol">
       <div>
-        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+        <form id="form-borrar-masivo" method="post" action="/borrar_pagos_masivo/{id}">
+          <input type="hidden" name="periodos_borrar" id="input-periodos-borrar">
+        </form>
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
           <button onclick="selTodos()" class="btn btn-xs btn-o">☑ Todos</button>
           <button onclick="deselTodos()" class="btn btn-xs btn-o">☐ Ninguno</button>
           <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado</button>
+          <button onclick="borrarSeleccionados()" class="btn btn-xs btn-r" id="btn-borrar-sel" style="display:none">🗑 Eliminar seleccionados</button>
         </div>
         {filas}
       </div>
@@ -2716,7 +2740,7 @@ def cuenta(id):
         '<div class="fg" style="flex:1;min-width:100px"><label>Monto por período $</label><input name="monto" type="number" value="'+str(int(abono_cli or 0))+'"></div>'
         '<div class="fg" style="flex:1;min-width:120px"><label>Medio</label><select name="medio">'+medios_opts+'</select></div>'
         '<button class="btn btn-o btn-sm" style="margin-bottom:4px" onclick="return confirm(\'Registrar todos los periodos del rango?\')">Registrar rango</button>'
-        '</div></form></div>' if session.get("rol")=="admin" else ""}
+        '</div></form></div>' if True else ""}
         <div class="fcard">
           <h3>Registrar Pago</h3>
           <div class="tabs" style="margin-bottom:12px">
@@ -2916,6 +2940,8 @@ def cuenta(id):
       }}
       if(bar) bar.style.display=chks.length>=1?'flex':'none';
       if(info) info.textContent=chks.length+' periodo(s) seleccionado(s)';
+      var btnDel=document.getElementById('btn-borrar-sel');
+      if(btnDel) btnDel.style.display=chks.length>=1?'inline-flex':'none';
     }}
     // Escuchar cambios en checkboxes
     document.addEventListener('change',function(e){{
@@ -2925,6 +2951,15 @@ def cuenta(id):
     document.addEventListener('click',function(e){{
       if(e.target && e.target.classList && e.target.classList.contains('per-chk')) setTimeout(updateSel,50);
     }});
+    function borrarSeleccionados(){{
+      var chks=document.querySelectorAll('.per-chk:checked');
+      if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
+      var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
+      var perDisplay=periodos.replace(/-/g,'/');
+      if(!confirm('Eliminar definitivamente los períodos: '+perDisplay+'?\nEsto no se puede deshacer.'))return;
+      document.getElementById('input-periodos-borrar').value=periodos;
+      document.getElementById('form-borrar-masivo').submit();
+    }}
     function selTodos(){{
       document.querySelectorAll('.per-chk').forEach(function(c){{c.checked=true;}});
       updateSel();
