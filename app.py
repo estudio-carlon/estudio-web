@@ -2481,6 +2481,7 @@ def cuenta(id):
             else:
                 badge='<span class="badge" style="background:#f0f0f0;color:#888">Sin cargo</span>'
         pu=d[0].replace("/","-")
+        if not d[0]: continue
         per_esc=d[0].replace('/','-')
         if saldo>0.5:
             bp=('<button data-per="'+d[0]+'" data-sal="'+str(round(saldo))+'"'
@@ -2816,6 +2817,8 @@ def cuenta(id):
     var _waTel = {json.dumps(telefono or "")};
     var _waNom = {json.dumps(nombre or "")};
     var _waCuit = {json.dumps(cuit or "")};
+    var _clienteId = {id};
+    var _baseUrl = "https://estudio-web-1.onrender.com";
 
     // Checkbox selection for consolidated recibo
     function updateSel(){{
@@ -2857,15 +2860,15 @@ def cuenta(id):
       if(chks.length<1){{alert('Selecciona al menos un periodo');return;}}
       var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
       var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
-      window.open('/recibo_consolidado/{id}?periodos='+periodos+'&total='+total,'_blank');
+      window.open('/recibo_consolidado/'+_clienteId+'?periodos='+periodos+'&total='+total,'_blank');
     }}
     function abrirWAConsolidado(){{
       var chks=document.querySelectorAll('.per-chk:checked');
       if(chks.length<1){{alert('Selecciona al menos un periodo');return;}}
       var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
       var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
-      var url='/recibo_consolidado/{id}?periodos='+periodos+'&total='+total;
-      var _base='{os.getenv("BASE_URL","https://estudio-web-1.onrender.com")}';
+      var url='/recibo_consolidado/'+_clienteId+'?periodos='+periodos+'&total='+total;
+      var _base=_baseUrl;
       var msg='Estimado/a '+_waNom+', le enviamos su recibo consolidado de pago por los periodos '+periodos.replace(/-/g,'/').replace(/,/g,', ')+'. Puede verlo aqui: '+_base+url+' -- Estudio Contable Carlon';
       window.open('https://wa.me/54'+_waTel.replace(/[^0-9]/g,'')+"?text="+encodeURIComponent(msg),'_blank');
     }}
