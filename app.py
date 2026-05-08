@@ -1641,7 +1641,7 @@ def configuracion():
     function selRango(){{
       var desde=document.getElementById('per-desde').value;
       var hasta=document.getElementById('per-hasta').value;
-      if(!desde||!hasta){{alert('Ingresá desde y hasta');return;}}
+      if(!desde||!hasta){{alert('Ingresa desde y hasta');return;}}
       var d=new Date(desde+'-01'), h=new Date(hasta+'-01');
       document.querySelectorAll('#periodos-check input[name=periodos_sel]').forEach(function(chk){{
         var p=chk.value;  // formato MM/YYYY
@@ -1890,7 +1890,7 @@ def clientes():
     function selRango(){{
       var desde=document.getElementById('per-desde').value;
       var hasta=document.getElementById('per-hasta').value;
-      if(!desde||!hasta){{alert('Ingresá desde y hasta');return;}}
+      if(!desde||!hasta){{alert('Ingresa desde y hasta');return;}}
       var d=new Date(desde+'-01'), h=new Date(hasta+'-01');
       document.querySelectorAll('#periodos-check input[name=periodos_sel]').forEach(function(chk){{
         var p=chk.value;  // formato MM/YYYY
@@ -2613,7 +2613,7 @@ def cuenta(id):
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
           <button onclick="selTodos()" class="btn btn-xs btn-o">☑ Todos</button>
           <button onclick="deselTodos()" class="btn btn-xs btn-o">☐ Ninguno</button>
-          <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado (0 períodos)</button>
+          <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado</button>
         </div>
         {filas}
       </div>
@@ -2710,7 +2710,7 @@ def cuenta(id):
             if(res&&n>0&&monto>0){{
               var por_per=Math.round(monto/n);
               var pers=Array.from(chks).map(c=>c.value).join(", ");
-              res.innerHTML="<b>"+n+" períodos:</b> "+pers+"<br><b>Por período:</b> $"+por_per.toLocaleString("es-AR")
+              res.innerHTML="<b>"+n+" periodos:</b> "+pers+"<br><b>Por periodo:</b> $"+por_per.toLocaleString("es-AR")
                 +(saldo!==0?"<br><b>Saldo "+(saldo>0?"a favor":"deudor")+":</b> $"+Math.abs(saldo).toLocaleString("es-AR"):"");
             }} else if(res) res.innerHTML="";
           }});
@@ -2808,19 +2808,19 @@ def cuenta(id):
       if(btn){{
         if(chks.length>=1){{
           btn.style.display='inline-flex';
-          btn.textContent='📄 Recibo consolidado ('+chks.length+' períodos)';
+          btn.textContent='Recibo consolidado ('+chks.length+' periodos)';
         }} else {{
           btn.style.display='none';
         }}
       }}
       if(bar) bar.style.display=chks.length>=1?'flex':'none';
-      if(info) info.textContent=chks.length+' período(s) seleccionado(s)';
+      if(info) info.textContent=chks.length+' periodo(s) seleccionado(s)';
     }}
     // Escuchar cambios en checkboxes
     document.addEventListener('change',function(e){{
       if(e.target && e.target.classList && e.target.classList.contains('per-chk')) updateSel();
     }});
-    // También escuchar clicks directos por si acaso
+    // Tambien escuchar clicks directos por si acaso
     document.addEventListener('click',function(e){{
       if(e.target && e.target.classList && e.target.classList.contains('per-chk')) setTimeout(updateSel,50);
     }});
@@ -2836,14 +2836,14 @@ def cuenta(id):
     setTimeout(updateSel, 200);
     function abrirReciboConsolidado(){{
       var chks=document.querySelectorAll('.per-chk:checked');
-      if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
+      if(chks.length<1){{alert('Selecciona al menos un periodo');return;}}
       var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
       var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
       window.open('/recibo_consolidado/{id}?periodos='+periodos+'&total='+total,'_blank');
     }}
     function abrirWAConsolidado(){{
       var chks=document.querySelectorAll('.per-chk:checked');
-      if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
+      if(chks.length<1){{alert('Selecciona al menos un periodo');return;}}
       var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
       var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
       var url='/recibo_consolidado/{id}?periodos='+periodos+'&total='+total;
@@ -2932,7 +2932,7 @@ def cuenta(id):
     function selRango(){{
       var desde=document.getElementById('per-desde').value;
       var hasta=document.getElementById('per-hasta').value;
-      if(!desde||!hasta){{alert('Ingresá desde y hasta');return;}}
+      if(!desde||!hasta){{alert('Ingresa desde y hasta');return;}}
       var d=new Date(desde+'-01'), h=new Date(hasta+'-01');
       document.querySelectorAll('#periodos-check input[name=periodos_sel]').forEach(function(chk){{
         var p=chk.value;  // formato MM/YYYY
