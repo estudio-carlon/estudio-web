@@ -2848,11 +2848,11 @@ def cuenta(id):
       var total=Array.from(chks).reduce(function(s,c){{return s+parseInt(c.dataset.monto||0)}},0);
       var url='/recibo_consolidado/{id}?periodos='+periodos+'&total='+total;
       var _base='{os.getenv("BASE_URL","https://estudio-web-1.onrender.com")}';
-      var msg='Estimado/a '+_waNom+', le enviamos su recibo consolidado de pago por los períodos '+periodos.replace(/-/g,'/').replace(/,/g,', ')+'. Puede verlo aquí: '+_base+url+' -- Estudio Contable Carlon';
+      var msg='Estimado/a '+_waNom+', le enviamos su recibo consolidado de pago por los periodos '+periodos.replace(/-/g,'/').replace(/,/g,', ')+'. Puede verlo aqui: '+_base+url+' -- Estudio Contable Carlon';
       window.open('https://wa.me/54'+_waTel.replace(/[^0-9]/g,'')+"?text="+encodeURIComponent(msg),'_blank');
     }}
     function abrirPago(p,s){{
-      document.getElementById('mp-sub').textContent=p+' · Saldo: $'+Math.round(s).toLocaleString('es-AR');
+      document.getElementById('mp-sub').textContent=p+' - Saldo: $'+Math.round(s).toLocaleString('es-AR');
       document.getElementById('mp-per').value=p;
       document.getElementById('mp-monto').value=Math.round(s);
       document.getElementById('mp').classList.add('on');
@@ -2869,17 +2869,17 @@ def cuenta(id):
     if(fChk){{
       fChk.addEventListener('change',function(){{
         if(this.checked){{
-          if(confirm('Se va a abrir ARCA para emitir la factura. ¿Continuar?'))
+          if(confirm('Se va a abrir ARCA para emitir la factura. Continuar?'))
             window.open('https://www.arca.gob.ar/landing/default.asp','_blank');
         }}
       }});
     }}
-    // También el checkbox del modal rapido
+    // Tambien el checkbox del modal rapido
     var fChkM=document.getElementById('chk-fact-m');
     if(fChkM){{
       fChkM.addEventListener('change',function(){{
         if(this.checked){{
-          if(confirm('Se va a abrir ARCA para emitir la factura. ¿Continuar?'))
+          if(confirm('Se va a abrir ARCA para emitir la factura. Continuar?'))
             window.open('https://www.arca.gob.ar/landing/default.asp','_blank');
         }}
       }});
@@ -2887,17 +2887,17 @@ def cuenta(id):
 
     function abrirWA(periodo, saldo){{
       var fmt=function(n){{return '$'+Math.round(n).toLocaleString('es-AR');}};
-      var msg = "Hola " + _waNom + "! 👋\n\n"
+      var msg = "Hola " + _waNom + "!\n\n"
         + "Le informamos que registra un saldo pendiente de *" + fmt(saldo) + "* "
-        + "correspondiente al período " + periodo + " en concepto de honorarios profesionales.\n\n"
+        + "correspondiente al periodo " + periodo + " en concepto de honorarios.\n\n"
         + "Para regularizar puede transferir a:\n"
-        + "🏦 Banco Nación\n"
+        + "Banco Nacion\n"
         + "CBU: 0110420630042013452529\n"
         + "Alias: ESTUDIO.CONTA.CARLON\n"
         + "Titular: Alexis Natasha Carlon\n\n"
-        + "Ante cualquier consulta estamos a disposición. Muchas gracias! 🙏\n"
-        + "— *Estudio Contable Carlon*";
-      document.getElementById('mwa-sub').textContent="Para: " + _waNom + " · " + periodo;
+        + "Muchas gracias!\n"
+        + "-- *Estudio Contable Carlon*";
+      document.getElementById('mwa-sub').textContent="Para: " + _waNom + " - " + periodo;
       document.getElementById('mwa-txt').value=msg;
       document.getElementById('mwa').classList.add('on');
     }}
@@ -2912,7 +2912,7 @@ def cuenta(id):
 
     function editarPago(pid,periodo,medio,monto,obs){{
       document.getElementById('mep-id').value=pid;
-      document.getElementById('mep-sub').textContent='Pago #'+pid+' · '+periodo;
+      document.getElementById('mep-sub').textContent='Pago #'+pid+' - '+periodo;
       document.getElementById('mep-per').value=periodo;
       document.getElementById('mep-monto').value=monto;
       var sel=document.getElementById('mep-medio');
