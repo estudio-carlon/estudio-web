@@ -2540,6 +2540,22 @@ def cuenta(id):
         concepto_p=h[9] if h[9] else "Honorarios mensuales"
         periodos_p=h[10] if h[10] else ""
         periodo_disp=str(h[2] or '')+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else '')
+        # Boton recibo consolidado si tiene multiples periodos
+        if periodos_p and ',' in periodos_p:
+            # Pago multiple - generar link consolidado
+            pers_esc=periodos_p.replace('/','-')
+            btn_recibo_hist=(
+                '<a href="/recibo_consolidado/'+str(id)+'?periodos='+pers_esc+'&total='+str(round(float(h[3] or 0)))+'" '
+                +'target="_blank" class="btn btn-xs btn-g" title="Descargar recibo consolidado">📄 Recibo</a>'
+            )
+        elif h[2]:
+            per_hist=str(h[2]).replace('/','-')
+            btn_recibo_hist=(
+                '<a href="/recibo/'+str(id)+'/'+per_hist+'" '
+                +'target="_blank" class="btn btn-xs btn-o" title="Ver recibo">📄</a>'
+            )
+        else:
+            btn_recibo_hist=""
         hist_rows+=(
             '<div class="logrow" style="justify-content:space-between;align-items:center">'
             +'<div style="display:flex;gap:8px;align-items:flex-start;flex:1">'
@@ -2551,7 +2567,8 @@ def cuenta(id):
             +' · '+fmt(h[3] or 0)+' · '+str(h[4] or '')
             +(((" · "+str(h[6])) if h[6] else "")+' '+fact_b+'</span>')
             +'</div>'
-            +btn_edit+'</div>')
+            +'<div style="display:flex;gap:4px">'+btn_recibo_hist+btn_edit+'</div>'
+            +'</div>')
     medios_opts="".join(f'<option value="{m}">{m}</option>' for m in MEDIOS_PAGO)
     medios_opts2=medios_opts
     medios_opts3=medios_opts
@@ -2590,10 +2607,11 @@ def cuenta(id):
         +periodos_deudores_html
         +'</div></div>'
     )
+    tel_disp=(tel or "---") if (tel or "").strip() not in ("","nan","NaN","None") else "---"
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Clientes</a>
     <h1 class="page-title">{nombre}</h1>
-    <p class="page-sub">CUIT: {cuit or "---"} · Tel: {tel or "---"} · {email or "---"}</p>
+    <p class="page-sub">CUIT: {cuit or "---"} - Tel: {tel_disp} - {email or "---"}</p>
     <div class="stats" style="margin-bottom:16px">
       <div class="scard g"><div class="slabel">Total Cobrado</div><div class="sval">{fmt(total_pago)}</div></div>
       <div class="scard r"><div class="slabel">Deuda Pendiente</div><div class="sval">{fmt(total_deuda)}</div></div>
