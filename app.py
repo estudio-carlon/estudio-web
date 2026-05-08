@@ -2357,6 +2357,65 @@ def editar_pago():
 # ══════════════════════════════════════════════════════════════════════════════
 #  CUENTA / PAGOS
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/registrar_periodos/<int:cliente_id>", methods=["POST"])
+@login_req
+def registrar_periodos(cliente_id):
+    """Registra masivamente periodos historicos para un cliente"""
+    desde=request.form.get("desde","").strip()  # MM/YYYY
+    hasta=request.form.get("hasta","").strip()  # MM/YYYY
+    monto_unitario=float(request.form.get("monto",0) or 0)
+    medio=request.form.get("medio","Transferencia -> Natasha Carlon")
+    if not desde or not hasta or monto_unitario<=0:
+        return redirect(f"/cuenta/{cliente_id}")
+    
+    conn=conectar();c=conn.cursor()
+    # Generate all periods between desde and hasta
+    from datetime import datetime as _dt
+    try:
+        d=_dt.strptime(desde,"%m/%Y")
+        h=_dt.strptime(hasta,"%m/%Y")
+    except:
+        conn.close(); return redirect(f"/cuenta/{cliente_id}")
+    
+    periodos=[]
+    cur=d
+    while cur<=h:
+        periodos.append(cur.strftime("%m/%Y"))
+        if cur.month==12: cur=cur.replace(year=cur.year+1,month=1)
+        else: cur=cur.replace(month=cur.month+1)
+    
+    registrados=0
+    for per in periodos:
+        c.execute("SELECT id,COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        row=c.fetchone()
+        if row:
+            if row[1]<monto_unitario:
+                c.execute("UPDATE cuentas SET debe=%s,haber=%s WHERE cliente_id=%s AND periodo=%s",
+                          (monto_unitario,monto_unitario,cliente_id,per))
+        else:
+            c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,%s)",
+                      (cliente_id,per,monto_unitario,monto_unitario))
+        # Check pagos
+        c.execute("SELECT id FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        if not c.fetchone():
+            try:
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (cliente_id,per,monto_unitario,medio,"Registro historico masivo",False,now_ar(),session.get("display","admin"),session.get("display","admin"),"Honorarios mensuales"))
+            except:
+                conn.rollback()
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (cliente_id,per,monto_unitario,medio,"Registro historico masivo",False,now_ar(),session.get("display","admin"),session.get("display","admin")))
+        registrados+=1
+    
+    conn.commit()
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
+    nom=c.fetchone()
+    conn.close()
+    registrar_auditoria("REGISTRO MASIVO",f"Periodos {desde}-{hasta} | {registrados} periodos | ${monto_unitario:,.0f}",
+                        cliente_id, nom[0] if nom else "?")
+    return redirect(f"/cuenta/{cliente_id}")
+
 @app.route("/cuenta/<int:id>", methods=["GET","POST"])
 @login_req
 def cuenta(id):
@@ -2646,6 +2705,18 @@ def cuenta(id):
         {filas}
       </div>
       <div>
+        <!-- Registro masivo historico (solo admin) -->
+        {'<div class="fcard" style="border:2px dashed var(--warning);margin-bottom:12px">'
+        '<h3 style="color:var(--warning)">⚡ Registro histórico masivo</h3>'
+        '<p style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Para registrar varios períodos históricos ya cobrados de una vez</p>'
+        '<form method="post" action="/registrar_periodos/'+str(id)+'">'
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+        '<div class="fg" style="flex:1;min-width:100px"><label>Desde</label><input name="desde" placeholder="MM/AAAA" value="09/2024"></div>'
+        '<div class="fg" style="flex:1;min-width:100px"><label>Hasta</label><input name="hasta" placeholder="MM/AAAA" value="'+datetime.now().strftime("%m/%Y")+'"></div>'
+        '<div class="fg" style="flex:1;min-width:100px"><label>Monto por período $</label><input name="monto" type="number" value="'+str(int(abono_cli or 0))+'"></div>'
+        '<div class="fg" style="flex:1;min-width:120px"><label>Medio</label><select name="medio">'+medios_opts+'</select></div>'
+        '<button class="btn btn-o btn-sm" style="margin-bottom:4px" onclick="return confirm(\'Registrar todos los periodos del rango?\')">Registrar rango</button>'
+        '</div></form></div>' if session.get("rol")=="admin" else ""}
         <div class="fcard">
           <h3>Registrar Pago</h3>
           <div class="tabs" style="margin-bottom:12px">
@@ -3689,64 +3760,79 @@ def ver_recibo_consolidado(cliente_id):
     periodos_raw=request.args.get("periodos","")
     total_param=request.args.get("total","0")
     if not periodos_raw:
-        return "Sin períodos seleccionados",400
+        return "Sin periodos seleccionados",400
     periodos=[p.replace("-","/") for p in periodos_raw.split(",")]
     try: total_manual=float(total_param)
     except: total_manual=0
 
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT nombre,cuit FROM clientes WHERE id=%s",(cliente_id,))
+    c.execute("SELECT nombre,cuit,abono FROM clientes WHERE id=%s",(cliente_id,))
     cli=c.fetchone()
     if not cli: conn.close(); return "Cliente no encontrado",404
-    cli_nombre,cuit_enc=cli
+    cli_nombre,cuit_enc,abono_cli=cli
     cuit_cli=dec(cuit_enc) if cuit_enc else ""
+    abono_cli=float(abono_cli or 0)
 
-    # Get actual amounts per period
+    # Get amounts per period - use pagos table as source of truth
+    c.execute("SELECT periodo,COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s GROUP BY periodo",(cliente_id,))
+    pagos_por_periodo={r[0]:float(r[1]) for r in c.fetchall()}
+
+    c.execute("SELECT periodo,COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s",(cliente_id,))
+    cuentas_dict={(r[0]):(float(r[1]),float(r[2])) for r in c.fetchall()}
+
     detalles=[]
     total_real=0
     for per in periodos:
-        c.execute("SELECT COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
-        row=c.fetchone()
-        if row:
-            monto=row[1] if row[1]>0 else row[0]
-            detalles.append((per,monto))
-            total_real+=monto
+        # Priority: what was actually paid (pagos table)
+        monto_pagado=pagos_por_periodo.get(per,0)
+        if monto_pagado>0:
+            monto=monto_pagado
         else:
-            detalles.append((per,0))
+            # Use haber from cuentas, or abono if nothing
+            cu=cuentas_dict.get(per,(0,0))
+            monto=cu[1] if cu[1]>0 else (cu[0] if cu[0]>0 else abono_cli)
+        detalles.append((per,monto))
+        total_real+=monto
+
+    medio_pago=request.args.get("medio","Transferencia -> Natasha Carlon")
+    monto_total=total_real if total_real>0 else total_manual
+
+    # Register payments in DB for each period
+    emitido=session.get("display","sistema")
+    for per,monto in detalles:
+        if monto<=0: continue
+        # Update or insert cuentas
+        cu=cuentas_dict.get(per)
+        if cu:
+            if cu[1]<monto:  # haber is less than what was paid
+                c.execute("UPDATE cuentas SET haber=%s WHERE cliente_id=%s AND periodo=%s",
+                          (monto,cliente_id,per))
+        else:
+            c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,%s)",
+                      (cliente_id,per,monto,monto))
+        # Check if pago already exists
+        c.execute("SELECT id FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        existing=c.fetchone()
+        if not existing:
+            periodos_str=",".join(p for p,_ in detalles)
+            try:
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),emitido,emitido,"Honorarios mensuales",periodos_str))
+            except:
+                conn.rollback()
+                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                          (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),emitido,emitido))
+    conn.commit()
     conn.close()
 
-    monto_total=total_real if total_real>0 else total_manual
-    # Registrar pagos en DB para cada periodo si no existen aun
-    medio_pago=request.args.get("medio","Transferencia -> Natasha Carlon")
-    if request.args.get("registrar","1")=="1":
-        c5=conn.cursor()
-        n_per=len([d for d in detalles if d[1]>0])
-        for per,monto in detalles:
-            if monto<=0: continue
-            # Check if pago already registered for this period
-            c5.execute("SELECT id FROM pagos WHERE cliente_id=%s AND periodo=%s AND monto=%s",(cliente_id,per,monto))
-            if not c5.fetchone():
-                # Update cuentas
-                c5.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
-                if c5.fetchone():
-                    c5.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(monto,cliente_id,per))
-                else:
-                    c5.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(cliente_id,per,monto))
-                # Register pago
-                periodos_str=",".join(p for p,_ in detalles)
-                try:
-                    c5.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                               (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),"sistema","sistema","Honorarios mensuales",periodos_str))
-                except:
-                    conn.rollback()
-                    c5.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                               (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),"sistema","sistema"))
-        conn.commit()
-        c5.close()
+    if not detalles or monto_total<=0:
+        return "No hay montos para generar el recibo",400
+
     pdf=generar_pdf_consolidado(cliente_id,cli_nombre,cuit_cli,detalles,monto_total)
     dl=request.args.get("download")
-    fname="recibo_consolidado_"+"_".join(p.replace("/","-") for p in periodos[:3])+".pdf"
-    return send_file(pdf,mimetype="application/pdf",as_attachment=bool(dl),download_name=fname)
+    fname="recibo_consolidado_"+cli_nombre.replace(" ","_")[:20]+".pdf"
+    return send_file(pdf,mimetype="application/pdf",
+                     as_attachment=bool(dl),download_name=fname)
 
 
 def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_total):
