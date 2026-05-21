@@ -6,6 +6,19 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.pagesizes import A4
 from datetime import datetime, timedelta
+try:
+    import pytz
+    AR_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
+    def now_ar_dt():
+        return datetime.now(AR_TZ)
+    def now_ar():
+        return now_ar_dt().strftime("%d/%m/%Y %H:%M")
+    def today_ar():
+        return now_ar_dt().strftime("%d/%m/%Y")
+except ImportError:
+    def now_ar_dt(): return datetime.now()
+    def now_ar(): return datetime.now().strftime("%d/%m/%Y %H:%M")
+    def today_ar(): return datetime.now().strftime("%d/%m/%Y")
 from io import BytesIO
 from cryptography.fernet import Fernet
 import pyotp, urllib.request, urllib.parse
@@ -407,7 +420,6 @@ def fmt(n):
     try: return f"${float(n):,.0f}".replace(",",".")
     except: return f"${n}"
 
-def now_ar(): return datetime.now().strftime("%d/%m/%Y %H:%M")
 
 def denied():
     b='<div class="denied"><div class="di">&#x1F512;</div><h2>Acceso restringido</h2><p>No tenes permiso para esta seccion.</p><a href="/clientes" class="btn btn-p">Volver</a></div>'
@@ -3255,10 +3267,12 @@ MEDIOS_CAJA = [
     ("Otro",            "otro",     "#888"),
 ]
 
-def _totales_caja(fecha_hoy, usuario):
+def _totales_caja(fecha_hoy, usuario=None):
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT medio,SUM(monto) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s AND fecha NOT LIKE '%%01/01/2000%%' GROUP BY medio",
-              (f"%{fecha_hoy}%", usuario))
+    if usuario:
+        c.execute("SELECT medio,SUM(monto) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s AND fecha NOT LIKE '%%01/01/2000%%' GROUP BY medio",(f"%{fecha_hoy}%",usuario))
+    else:
+        c.execute("SELECT medio,SUM(monto) FROM pagos WHERE fecha LIKE %s AND fecha NOT LIKE '%%01/01/2000%%' GROUP BY medio",(f"%{fecha_hoy}%",))
     filas=c.fetchall(); conn.close()
     tot = {k[0]:0.0 for k in MEDIOS_CAJA}
     for medio,monto in filas:
@@ -3290,8 +3304,8 @@ def _ci(label, valor, color, extra=""):
 def caja():
     conn=conectar();c=conn.cursor();flash=""
     usuario=session.get("display","");rol=session.get("rol","secretaria")
-    fecha_hoy=datetime.now().strftime("%d/%m/%Y")
-
+    fecha_hoy=today_ar()
+    
     if request.method=="POST":
         accion=request.form.get("accion","")
         if accion=="editar_cierre" and rol=="admin":
@@ -3316,7 +3330,7 @@ def caja():
             if c.fetchone():
                 flash='<div class="flash ferr">Ya cerraste tu caja hoy</div>'
             else:
-                tot=_totales_caja(fecha_hoy,usuario)
+                tot=_totales_caja(fecha_hoy)
                 c.execute("SELECT p.fecha,cl.nombre,p.monto,p.medio,p.observaciones FROM pagos p JOIN clientes cl ON cl.id=p.cliente_id WHERE p.fecha LIKE %s AND p.emitido_por=%s ORDER BY p.id",(f"%{fecha_hoy}%",usuario))
                 pagos_dia=c.fetchall()
                 detalle=" | ".join(f"{p[1]}:{fmt(p[2])}({p[3]})" for p in pagos_dia)
@@ -3331,8 +3345,8 @@ def caja():
                 registrar_auditoria("CIERRE_CAJA",f"Ef:{fmt(tot['Efectivo'])} Ch:{fmt(tot['Cheque'])} U$S:{fmt(tot['Dolares'])} Nat:{fmt(tot['Transf. Natasha'])} Mai:{fmt(tot['Transf. Maira'])} Total:{fmt(tot['_total'])}")
                 flash=f'<div class="flash fok">Caja cerrada · Efectivo: {fmt(tot["Efectivo"])} · Cheque: {fmt(tot["Cheque"])} · U$S: {fmt(tot["Dolares"])} · Nat: {fmt(tot["Transf. Natasha"])} · Maira: {fmt(tot["Transf. Maira"])} · <b>Total: {fmt(tot["_total"])}</b></div>'
 
-    tot_hoy=_totales_caja(fecha_hoy,usuario)
-    c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s AND cerrado=TRUE",(fecha_hoy,usuario))
+    tot_hoy=_totales_caja(fecha_hoy)
+    c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND cerrado=TRUE LIMIT 1",(fecha_hoy,))
     _cierre_row=c.fetchone()
     # Also check if there are real pagos today by this user
     c.execute("SELECT COUNT(*) FROM pagos WHERE fecha LIKE %s AND emitido_por=%s AND fecha NOT LIKE '%%2000%%'",(fecha_hoy+"%",usuario))
