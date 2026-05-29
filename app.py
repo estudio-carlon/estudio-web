@@ -2674,7 +2674,11 @@ def cuenta(id):
                 if h[5] else '<span style="color:var(--muted);font-size:.69rem">Sin factura</span>')
         emitido=h[7] or h[1]
         pid=h[8] if h[8] else 0
-        btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(h[3])+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
+        # Calcular monto por periodo si es pago multiple
+n_pers = len(periodos_p.split(',')) if periodos_p and ',' in periodos_p else 1
+monto_edit = round(float(h[3] or 0) / n_pers)
+
+btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(monto_edit)+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
         concepto_p=h[9] if h[9] else "Honorarios mensuales"
         periodos_p=h[10] if h[10] else ""
         periodo_disp=str(h[2] or '')+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else '')
