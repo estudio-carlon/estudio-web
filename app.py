@@ -2678,7 +2678,7 @@ def cuenta(id):
         periodos_p=h[10] if h[10] else ""
         n_pers=len(periodos_p.split(',')) if periodos_p and ',' in periodos_p else 1
         monto_edit=round(float(h[3] or 0)/n_pers)
-        btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+h[2]+'" data-med="'+h[4].replace('"','&quot;')+'" data-mon="'+str(monto_edit)+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
+        btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+str(h[2] or "").replace("'","&#39;")+'" data-med="'+str(h[4] or "").replace('"','&quot;').replace("'","&#39;")+'" data-mon="'+str(monto_edit)+'" data-obs="'+str(h[6] or "").replace('"','&quot;').replace("'","&#39;")+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
         periodo_disp=str(h[2] or '')+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else '')
         # Boton recibo consolidado si tiene multiples periodos
         if periodos_p and ',' in periodos_p:
