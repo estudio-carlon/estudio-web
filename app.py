@@ -3020,7 +3020,7 @@ def cuenta(id):
       if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
       var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
       var perDisplay=periodos.replace(/-/g,'/');
-      if(!confirm('Eliminar definitivamente los períodos: '+perDisplay+'?\nEsto no se puede deshacer.'))return;
+      if(!confirm('Eliminar definitivamente los períodos: '+perDisplay+'?\\nEsto no se puede deshacer.'))return;
       document.getElementById('input-periodos-borrar').value=periodos;
       document.getElementById('form-borrar-masivo').submit();
     }}
