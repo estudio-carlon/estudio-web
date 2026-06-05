@@ -3087,15 +3087,15 @@ def cuenta(id):
 
     function abrirWA(periodo, saldo){{
       var fmt=function(n){{return '$'+Math.round(n).toLocaleString('es-AR');}};
-      var msg = "Hola " + _waNom + "!\n\n"
+      var msg = "Hola " + _waNom + "!\\n\\n"
         + "Le informamos que registra un saldo pendiente de *" + fmt(saldo) + "* "
-        + "correspondiente al periodo " + periodo + " en concepto de honorarios.\n\n"
-        + "Para regularizar puede transferir a:\n"
-        + "Banco Nacion\n"
-        + "CBU: 0110420630042013452529\n"
-        + "Alias: ESTUDIO.CONTA.CARLON\n"
-        + "Titular: Alexis Natasha Carlon\n\n"
-        + "Muchas gracias!\n"
+        + "correspondiente al periodo " + periodo + " en concepto de honorarios.\\n\\n"
+        + "Para regularizar puede transferir a:\\n"
+        + "Banco Nacion\\n"
+        + "CBU: 0110420630042013452529\\n"
+        + "Alias: ESTUDIO.CONTA.CARLON\\n"
+        + "Titular: Alexis Natasha Carlon\\n\\n"
+        + "Muchas gracias!\\n"
         + "-- *Estudio Contable Carlon*";
       document.getElementById('mwa-sub').textContent="Para: " + _waNom + " - " + periodo;
       document.getElementById('mwa-txt').value=msg;
