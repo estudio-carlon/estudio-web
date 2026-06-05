@@ -3006,7 +3006,7 @@ def cuenta(id):
           btnDel.style.display='none';
         }}
       }}
-    }}
+    
     // Escuchar cambios en checkboxes
     document.addEventListener('change',function(e){{
       if(e.target && e.target.classList && e.target.classList.contains('per-chk')) updateSel();
