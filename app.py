@@ -2678,7 +2678,7 @@ def cuenta(id):
         periodos_p=h[10] if h[10] else ""
         n_pers=len(periodos_p.split(',')) if periodos_p and ',' in periodos_p else 1
         monto_edit=round(float(h[3] or 0)/n_pers)
-        btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+str(h[2] or "").replace("'","&#39;")+'" data-med="'+str(h[4] or "").replace('"','&quot;').replace("'","&#39;").replace(">","&gt;").replace("<","&lt;")+'" data-mon="'+str(monto_edit)+'" data-obs="'+str(h[6] or "").replace('"','&quot;').replace("'","&#39;").replace(">","&gt;").replace("<","&lt;")+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
+        btn_edit=('<button data-pid="'+str(pid)+'" data-per="'+str(h[2] or "").replace('"','&quot;')+'" data-med="'+str(h[4] or "").replace('"','&quot;')+'" data-mon="'+str(monto_edit)+'" data-obs="'+str(h[6] or "").replace('"','&quot;')+'" class="btn btn-xs btn-o editBtn" title="Editar">&#9998;</button>')
         periodo_disp=str(h[2] or '')+(f' ({periodos_p})' if periodos_p and periodos_p!=h[2] else '')
         # Boton recibo consolidado si tiene multiples periodos
         if periodos_p and ',' in periodos_p:
@@ -4049,8 +4049,30 @@ def generar_pdf(cliente_id, periodo, monto):
     buffer=BytesIO();cv=canvas.Canvas(buffer,pagesize=A4);w,h=A4
     conn=conectar();c=conn.cursor()
     c.execute("SELECT nombre,cuit FROM clientes WHERE id=%s",(cliente_id,))
-    data=c.fetchone();conn.close()
+    data=c.fetchone()
     cli_nombre=data[0] if data else "—";cuit_cli=dec(data[1]) if data else ""
+    # Traer concepto, detalle y fecha real del pago de este periodo
+    concepto_pago="Honorarios mensuales";detalle_pago="";fecha_pago=""
+    try:
+        c.execute("""SELECT COALESCE(concepto,'Honorarios mensuales'),COALESCE(observaciones,''),COALESCE(fecha,'')
+                     FROM pagos WHERE cliente_id=%s AND periodo=%s ORDER BY id DESC LIMIT 1""",(cliente_id,periodo))
+        rp=c.fetchone()
+        if rp:
+            concepto_pago=rp[0] or "Honorarios mensuales"
+            detalle_pago=rp[1] or ""
+            fecha_pago=rp[2] or ""
+    except: pass
+    conn.close()
+    # Numero y fecha basados en la fecha real del pago
+    if fecha_pago:
+        try:
+            fecha_dt=datetime.strptime(fecha_pago.split()[0],"%d/%m/%Y")
+            numero=fecha_dt.strftime("%Y%m%d")+"000"+str(cliente_id)
+            fecha_recibo=fecha_pago
+        except:
+            numero=datetime.now().strftime("%Y%m%d%H%M%S");fecha_recibo=datetime.now().strftime("%d/%m/%Y %H:%M")
+    else:
+        numero=datetime.now().strftime("%Y%m%d%H%M%S");fecha_recibo=datetime.now().strftime("%d/%m/%Y %H:%M")
 
     # ── Encabezado verde ──────────────────────────────────────────────────────
     cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(0,h-140,w,140,fill=1,stroke=0)
@@ -4080,9 +4102,8 @@ def generar_pdf(cliente_id, periodo, monto):
     cv.drawString(x_txt,h-52,"RECIBO DE PAGO")
     cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica",8.5)
     cv.drawString(x_txt,h-68,"Estudio Contable Carlon — Servicios Contables e Impositivos")
-    numero=datetime.now().strftime("%Y%m%d%H%M%S")
     cv.setFont("Helvetica-Bold",9);cv.drawRightString(w-36,h-52,f"N° {numero}")
-    cv.setFont("Helvetica",8);cv.drawRightString(w-36,h-66,datetime.now().strftime("%d/%m/%Y %H:%M"))
+    cv.setFont("Helvetica",8);cv.drawRightString(w-36,h-66,fecha_recibo)
 
     # ── Emisor ─────────────────────────────────────────────────────────────────
     cv.setFillColorRGB(0.15,0.15,0.15);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-160,"EMISOR")
@@ -4095,16 +4116,23 @@ def generar_pdf(cliente_id, periodo, monto):
     cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",14);cv.drawString(36,h-234,cli_nombre)
     cv.setFont("Helvetica",8.5);cv.setFillColorRGB(0.3,0.3,0.3)
     cv.drawString(36,h-250,f"CUIT: {cuit_cli or '—'}   ·   Periodo: {periodo}")
+    # Concepto del recibo
+    cv.setFillColorRGB(0.53,0.53,0.53);cv.setFont("Helvetica-Bold",8);cv.drawString(36,h-268,"CONCEPTO")
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",10)
+    cv.drawString(36,h-282,concepto_pago[:70])
+    if detalle_pago:
+        cv.setFont("Helvetica",8);cv.setFillColorRGB(0.35,0.35,0.35)
+        cv.drawString(36,h-294,detalle_pago[:90])
 
     # ── Monto ──────────────────────────────────────────────────────────────────
-    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,h-320,w-72,55,8,fill=1,stroke=0)
-    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",10);cv.drawString(54,h-282,"TOTAL ABONADO")
+    cv.setFillColorRGB(0.97,0.96,0.93);cv.roundRect(36,h-360,w-72,55,8,fill=1,stroke=0)
+    cv.setFillColorRGB(0.10,0.23,0.16);cv.setFont("Helvetica-Bold",10);cv.drawString(54,h-322,"TOTAL ABONADO")
     cv.setFont("Helvetica-Bold",24)
     try: mf=f"$ {float(monto):,.0f}".replace(",",".")
     except: mf=f"$ {monto}"
-    cv.drawRightString(w-54,h-282,mf)
+    cv.drawRightString(w-54,h-322,mf)
     cv.setFont("Helvetica",8);cv.setFillColorRGB(0.45,0.45,0.45)
-    cv.drawString(36,h-338,"Recibí conforme el importe indicado en concepto de honorarios profesionales.")
+    cv.drawString(36,h-378,"Recibí conforme el importe indicado en concepto de honorarios profesionales.")
 
     # ── Firmas ─────────────────────────────────────────────────────────────────
     cv.setStrokeColorRGB(0.72,0.72,0.72)
