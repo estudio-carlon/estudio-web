@@ -2777,6 +2777,7 @@ def cuenta(id):
           <button onclick="deselTodos()" class="btn btn-xs btn-o">☐ Ninguno</button>
           <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado</button>
           <button onclick="borrarSeleccionados()" class="btn btn-xs btn-r" id="btn-borrar-sel" style="display:none">🗑 Eliminar seleccionados</button>
+          <span id="sel-count" style="font-size:.78rem;color:var(--danger);font-weight:700"></span>
         </div>
         {filas}
       </div>
@@ -2997,7 +2998,14 @@ def cuenta(id):
       if(bar) bar.style.display=chks.length>=1?'flex':'none';
       if(info) info.textContent=chks.length+' periodo(s) seleccionado(s)';
       var btnDel=document.getElementById('btn-borrar-sel');
-      if(btnDel) btnDel.style.display=chks.length>=1?'inline-flex':'none';
+      if(btnDel){{
+        if(chks.length>=1){{
+          btnDel.style.display='inline-flex';
+          btnDel.textContent='🗑 Eliminar '+chks.length+' seleccionado'+(chks.length>1?'s':'');
+        }} else {{
+          btnDel.style.display='none';
+        }}
+      }}
     }}
     // Escuchar cambios en checkboxes
     document.addEventListener('change',function(e){{
