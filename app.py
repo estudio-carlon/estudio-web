@@ -1044,7 +1044,7 @@ def panel():
     # Alertas de seguridad sin resolver
     c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE resuelto=FALSE AND tipo IN ('BLOQUEO_IP','ACCESO_PAIS_BLOQUEADO','LOGIN_FALLIDO')");alertas_sec=c.fetchone()[0]
     # Datos para gráficos
-    c.execute("SELECT periodo,COALESCE(SUM(haber),0) FROM cuentas WHERE periodo ~ '^[0-9]{{2}}/[0-9]{{4}}$' GROUP BY periodo ORDER BY SPLIT_PART(periodo,'/',2) DESC,SPLIT_PART(periodo,'/',1) DESC LIMIT 8")
+    c.execute("SELECT periodo,COALESCE(SUM(haber),0) FROM cuentas WHERE periodo ~ '^[0-9]{2}/[0-9]{4}$' GROUP BY periodo ORDER BY SPLIT_PART(periodo,'/',2) DESC,SPLIT_PART(periodo,'/',1) DESC LIMIT 8")
     raw_ing=list(reversed(c.fetchall()))
     periodos=[r[0] for r in raw_ing];ingresos_m=[float(r[1]) for r in raw_ing]
     gastos_m=[]
@@ -1130,7 +1130,7 @@ def panel():
     <div class="stats">
       <div class="scard"><div class="sicon">&#x1F4B0;</div><div class="slabel">Total Facturado</div><div class="sval">{fmt(td)}</div></div>
       <div class="scard g"><div class="sicon">&#x2705;</div><div class="slabel">Total Cobrado</div><div class="sval">{fmt(th)}</div></div>
-      <div class="scard r"><div class="sicon">&#x1F534;</div><div class="slabel">Deuda Pendiente</div><div class="sval">{fmt(deuda)}</div></div>
+      <div class="scard {'r' if deuda>0 else 'g'}"><div class="sicon">{'&#x1F534;' if deuda>0 else '&#x2705;'}</div><div class="slabel">{'Deuda Pendiente' if deuda>0 else 'Saldo a Favor'}</div><div class="sval">{fmt(abs(deuda))}</div></div>
       <div class="scard o"><div class="sicon">&#x1F4B8;</div><div class="slabel">Total Gastos</div><div class="sval">{fmt(tg)}</div></div>
       <div class="scard {'g' if rend>=0 else 'r'}"><div class="sicon">&#x1F4CA;</div><div class="slabel">Rendimiento Real</div><div class="sval">{fmt(rend)}</div></div>
       <div class="scard b"><div class="sicon">&#x1F465;</div><div class="slabel">Clientes</div><div class="sval">{nc}</div></div>
@@ -1262,7 +1262,7 @@ def seguridad():
     eventos = c.fetchall()
     c.execute("SELECT ip,motivo,fecha,desbloqueada FROM ips_bloqueadas ORDER BY id DESC LIMIT 50")
     ips_bl = c.fetchall()
-    c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE resuelto=FALSE");total_pend = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE resuelto=FALSE AND tipo IN ('BLOQUEO_IP','ACCESO_PAIS_BLOQUEADO','LOGIN_FALLIDO')");total_pend = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE tipo='LOGIN_FALLIDO' AND fecha LIKE %s",(f"%{datetime.now().strftime('%d/%m/%Y')}%",));hoy_fallidos = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE tipo='BLOQUEO_IP'");total_bloq = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM seguridad_eventos WHERE tipo='LOGIN_OK' AND fecha LIKE %s",(f"%{datetime.now().strftime('%d/%m/%Y')}%",));hoy_ok = c.fetchone()[0]
@@ -3387,9 +3387,9 @@ def caja():
                 flash='<div class="flash ferr">Ya cerraste tu caja hoy</div>'
             else:
                 tot=_totales_caja(fecha_hoy)
-                c.execute("SELECT p.fecha,cl.nombre,p.monto,p.medio,p.observaciones FROM pagos p JOIN clientes cl ON cl.id=p.cliente_id WHERE p.fecha LIKE %s AND p.emitido_por=%s ORDER BY p.id",(f"%{fecha_hoy}%",usuario))
+                c.execute("SELECT p.fecha,cl.nombre,p.monto,p.medio,p.observaciones,p.periodo,p.concepto FROM pagos p JOIN clientes cl ON cl.id=p.cliente_id WHERE p.fecha LIKE %s AND p.emitido_por=%s ORDER BY p.id",(f"%{fecha_hoy}%",usuario))
                 pagos_dia=c.fetchall()
-                detalle=" | ".join(f"{p[1]}:{fmt(p[2])}({p[3]})" for p in pagos_dia)
+                detalle=" | ".join(f"{p[1]}:{fmt(p[2])}({p[3]})"+(f" · Periodo {p[5]}" if p[5] else "")+(f" · {p[6]}" if p[6] else "") for p in pagos_dia)
                 c.execute("SELECT id FROM cierres_caja WHERE fecha=%s AND usuario=%s",(fecha_hoy,usuario))
                 existe=c.fetchone()
                 v=(tot["Efectivo"],tot["Cheque"],tot["Dolares"],tot["Transf. Natasha"],tot["Transf. Maira"],tot["Otro"],tot["_fisico"],tot["_total"],detalle,datetime.now().strftime("%H:%M"))
