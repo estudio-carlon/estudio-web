@@ -532,6 +532,7 @@ def actualizar_db():
     for ddl in [
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email TEXT",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS abono REAL DEFAULT 0",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS notas TEXT",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre_display TEXT",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol TEXT DEFAULT 'secretaria'",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_secret TEXT",
@@ -1842,16 +1843,18 @@ def clientes():
 
     tab_cl=request.args.get("tab","activos")
     if tab_cl=="baja":
-        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes WHERE activo=FALSE ORDER BY nombre")
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas FROM clientes WHERE activo=FALSE ORDER BY nombre")
     else:
-        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
     data_raw=c.fetchall()
     # count baja
     c.execute("SELECT COUNT(*) FROM clientes WHERE activo=FALSE");n_baja=c.fetchone()[0]
     conn.close();es_admin=session.get("rol")=="admin"
     rows=""
     for d in data_raw:
-        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f=d
+        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f,notas_raw=d
+        notas_attr=(notas_raw or "").replace("&","&amp;").replace(chr(34),"&quot;").replace("<","&lt;").replace(chr(10),"&#10;")
+        nombre_attr=(nombre or "").replace("&","&amp;").replace(chr(34),"&quot;")
         cuit_d=dec(cuit_enc);tel_d=dec(tel_enc);email_d=dec(email_enc)
         cuit_limpio=(cuit_d or "").replace("-","").replace(" ","")
         cond_color={"Responsable Inscripto":"#185FA5","Monotributista":"#1D9E75","Exento":"#7B68EE"}.get(condicion or "","#888")
@@ -1879,6 +1882,7 @@ def clientes():
           <td><div style="display:flex;gap:4px;flex-wrap:wrap">
             <a href="/cuenta/{cid}" class="btn btn-xs btn-p">Cuenta</a>
             <a href="/editar_cliente/{cid}" class="btn btn-xs btn-o">Editar</a>
+            <button type="button" class="btn btn-xs btn-b notasBtn" data-cid="{cid}" data-nombre="{nombre_attr}" data-notas="{notas_attr}">📝 Notas</button>
             {btn_arca}{btn_iibb}{btn_del}
           </div></td>
         </tr>'''
@@ -1888,6 +1892,15 @@ def clientes():
                   +' <a href="/wa_facturas_preview?tipo=cobro" class="btn btn-wa btn-sm">💰 WA Cobros</a>')
     cond_opts="".join(f'<option value="{cf}">{cf}</option>' for cf in CONDICIONES_FISCALES)
     modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM(&apos;mb&apos;)">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
+    modal += '''<div class="mo" id="mnotas"><div class="modal">
+      <h3>📝 Notas del cliente</h3>
+      <p class="msub" id="mnotas-nombre"></p>
+      <textarea id="mnotas-textarea" rows="6" style="width:100%;font-size:.88rem;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text)" placeholder="Escribi aca observaciones relevantes sobre este cliente..."></textarea>
+      <div class="mact" style="margin-top:12px">
+        <button type="button" class="btn btn-o" onclick="closeM('mnotas')">Cancelar</button>
+        <button type="button" class="btn btn-p" onclick="guardarNotas()">Guardar</button>
+      </div>
+    </div></div>'''
     n_ri=sum(1 for d in data_raw if d[8])
     n_wa=sum(1 for d in data_raw if d[9])
     form_nuevo_cli='<div class="fcard"><h3>Nuevo Cliente</h3><form method="post">' if tab_cl=="activos" else ""
@@ -1965,8 +1978,35 @@ def clientes():
     var waChk=document.getElementById('wa-chk');if(waChk)waChk.addEventListener('change',function(){{document.getElementById('wa-hint').style.display=this.checked?'block':'none'}})
     function buscarArca(){{var c=document.getElementById('cuit-inp').value.replace(/-/g,'').replace(/ /g,'');if(!c){{alert('Ingresá el CUIT');return;}}window.open('https://seti.afip.gob.ar/padron-puc-constancia-internet/ConsultaConstanciaAction.do?nroCuit='+c,'_blank')}}
     function buscarIIBB(){{var c=document.getElementById('cuit-inp').value.replace(/-/g,'').replace(/ /g,'');if(!c){{alert('Ingresá el CUIT');return;}}window.open('http://dgronline.dgrsantiago.gob.ar/dgronline/HPreImpCons005Libre.aspx?cuit='+c,'_blank')}}
+    
+    var __notasCid=null;
+    function abrirNotas(btn){{
+      __notasCid=btn.dataset.cid;
+      document.getElementById('mnotas-nombre').textContent=btn.dataset.nombre;
+      document.getElementById('mnotas-textarea').value=btn.dataset.notas||'';
+      document.getElementById('mnotas').classList.add('on');
+    }}
+    function guardarNotas(){{
+      var txt=document.getElementById('mnotas-textarea').value;
+      var fd=new FormData();fd.append('nota',txt);
+      fetch('/guardar_nota/'+__notasCid,{{method:'POST',body:fd}}).then(function(){{location.reload();}});
+    }}
+    document.addEventListener('click',function(e){{
+      var b=e.target.closest('.notasBtn');
+      if(b) abrirNotas(b);
+    }});
     </script>"""
     return page("Clientes",body,"Clientes")
+
+@app.route("/guardar_nota/<int:cliente_id>", methods=["POST"])
+@login_req
+def guardar_nota(cliente_id):
+    nota=request.form.get("nota","").strip()
+    conn=conectar();c=conn.cursor()
+    c.execute("UPDATE clientes SET notas=%s WHERE id=%s",(nota,cliente_id))
+    conn.commit();conn.close()
+    registrar_auditoria("NOTA CLIENTE","Nota actualizada",cliente_id)
+    return jsonify({"ok":True})
 
 @app.route("/editar_cliente/<int:id>", methods=["GET","POST"])
 @login_req
@@ -3006,7 +3046,8 @@ def cuenta(id):
           btnDel.style.display='none';
         }}
       }}
-    
+    }}
+
     // Escuchar cambios en checkboxes
     document.addEventListener('change',function(e){{
       if(e.target && e.target.classList && e.target.classList.contains('per-chk')) updateSel();
@@ -4053,7 +4094,7 @@ def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_to
 
     cv.save();buffer.seek(0);return buffer
 
-def generar_pdf(cliente_id, periodo, monto):
+def generar_pdf(cliente_id, periodo, monto, saldo_pendiente=0):
     buffer=BytesIO();cv=canvas.Canvas(buffer,pagesize=A4);w,h=A4
     conn=conectar();c=conn.cursor()
     c.execute("SELECT nombre,cuit FROM clientes WHERE id=%s",(cliente_id,))
@@ -4139,6 +4180,11 @@ def generar_pdf(cliente_id, periodo, monto):
     try: mf=f"$ {float(monto):,.0f}".replace(",",".")
     except: mf=f"$ {monto}"
     cv.drawRightString(w-54,h-322,mf)
+    if saldo_pendiente and saldo_pendiente>0.5:
+        try: sp_fmt=f"$ {float(saldo_pendiente):,.0f}".replace(",",".")
+        except: sp_fmt=f"$ {saldo_pendiente}"
+        cv.setFillColorRGB(0.75,0.15,0.1);cv.setFont("Helvetica-Bold",9)
+        cv.drawString(54,h-340,f"PAGO PARCIAL — Saldo pendiente: {sp_fmt}")
     cv.setFont("Helvetica",8);cv.setFillColorRGB(0.45,0.45,0.45)
     cv.drawString(36,h-378,"Recibí conforme el importe indicado en concepto de honorarios profesionales.")
 
@@ -4197,7 +4243,8 @@ def ver_recibo(cliente_id,periodo):
     data=c.fetchone();conn.close()
     if not data: return "No hay datos para ese período",404
     monto=data[1] if data[1]>0 else data[0]
-    pdf=generar_pdf(cliente_id,periodo,monto);dl=request.args.get("download")
+    saldo_pendiente=max((data[0] or 0)-(data[1] or 0),0)
+    pdf=generar_pdf(cliente_id,periodo,monto,saldo_pendiente);dl=request.args.get("download")
     return send_file(pdf,mimetype="application/pdf",as_attachment=bool(dl),download_name=f"recibo_{periodo.replace('/','_')}.pdf")
 
 # ══════════════════════════════════════════════════════════════════════════════
