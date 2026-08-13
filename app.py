@@ -293,6 +293,11 @@ nav{background:var(--primary);padding:0 28px;display:flex;align-items:center;jus
 .caja-item{display:flex;flex-direction:column;align-items:center;background:var(--bg);border-radius:8px;padding:8px 14px;min-width:90px;border:1px solid var(--border)}
 .caja-item .ci-label{font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
 .caja-item .ci-val{font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--primary)}
+.caja-detalle{margin-top:8px}
+.caja-detalle summary{cursor:pointer;font-size:.78rem;font-weight:600;color:var(--primary);padding:4px 0;list-style:none}
+.caja-detalle summary::-webkit-details-marker{display:none}
+.caja-detalle-body{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.caja-cliente-item{font-size:.78rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 10px;display:flex;justify-content:space-between;gap:10px}
 .estado-abierta{display:inline-flex;align-items:center;gap:5px;background:#d5f5e3;color:#1a7a42;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700}
 .estado-cerrada{display:inline-flex;align-items:center;gap:5px;background:#f0f0f0;color:#666;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700}
 .sec-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:10px;font-size:.68rem;font-weight:700}
@@ -3418,10 +3423,10 @@ def caja():
 
     if rol=="admin":
         # Admin ve historial completo de todos
-        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja ORDER BY id DESC LIMIT 40")
+        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre,detalle_pagos FROM cierres_caja ORDER BY id DESC LIMIT 40")
     else:
         # Secretaria solo ve su propio historial (sin acumular dias anteriores en totales)
-        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre FROM cierres_caja WHERE usuario=%s AND fecha=%s ORDER BY id DESC LIMIT 5",(usuario,fecha_hoy))
+        c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre,detalle_pagos FROM cierres_caja WHERE usuario=%s AND fecha=%s ORDER BY id DESC LIMIT 5",(usuario,fecha_hoy))
     cierres=c.fetchall(); conn.close()
 
     # Items caja hoy - todos los medios siempre visibles
@@ -3464,7 +3469,7 @@ def caja():
     cierre_html=""
     es_adm=session.get("rol")=="admin"
     for ci in cierres:
-        cid_c,fci,uci,ef,ch,dol,nat,mai,otr,tf,tg,cerr,hora=ci
+        cid_c,fci,uci,ef,ch,dol,nat,mai,otr,tf,tg,cerr,hora,detalle_pagos_ci=ci
         its=(_ci("Efectivo",ef or 0,"#27AE60","min-width:72px;padding:5px 8px")+
              _ci("Cheque",ch or 0,"#2475B0","min-width:72px;padding:5px 8px")+
              _ci("U$S",dol or 0,"#E67E22","min-width:72px;padding:5px 8px")+
@@ -3480,11 +3485,17 @@ def caja():
             f' data-otr="{otr or 0}" data-fci="{fci}" data-uci="{uci}"'
             f' class="btn btn-xs btn-o cajEditBtn" title="Editar cierre">✏️ Editar</button>'
         ) if es_adm else ""
+        detalle_pagos_html=''
+        if detalle_pagos_ci:
+            partes_cli=[p.strip() for p in detalle_pagos_ci.split(' | ') if p.strip()]
+            if partes_cli:
+                filas_cli=''.join(f'<div class="caja-cliente-item"><span>{p.split(":")[0]}</span><span>{":".join(p.split(":")[1:])}</span></div>' for p in partes_cli)
+                detalle_pagos_html=f'<details class="caja-detalle"><summary>\U0001F465 Ver clientes que abonaron ({len(partes_cli)})</summary><div class="caja-detalle-body">{filas_cli}</div></details>'
         cierre_html+=(f'<div class="caja-row"><div class="caja-header">'
                      f'<div><span class="caja-user">{uci}</span><span class="caja-fecha"> · {fci}</span></div>'
                      f'<div style="display:flex;align-items:center;gap:8px">{est}{btn_editar_caja}</div>'
                      f'</div>'
-                     f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its}</div></div>')
+                     f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its}</div>{detalle_pagos_html}</div>')
 
     if ya_cerro:
         btn_cierre='<div class="info-box" style="margin-top:12px">Caja cerrada hoy. Manana se abre automaticamente.</div>'
