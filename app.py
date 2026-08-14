@@ -407,7 +407,7 @@ def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
     links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades")]
+    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -424,6 +424,19 @@ def page(title,body,active=""):
 def fmt(n):
     try: return f"${float(n):,.0f}".replace(",",".")
     except: return f"${n}"
+
+# Cronograma general AFIP de IVA (F.731) mensual: los contribuyentes se agrupan
+# de a pares de terminacion de CUIT en 5 vencimientos escalonados dentro de la
+# misma semana del mes siguiente. No es un dia fijo (varia segun la RG de cada
+# año), por eso se identifica solo el grupo/orden de vencimiento, no el dia exacto.
+def grupo_vto_iva(cuit_str):
+    try:
+        cuit_limpio = (cuit_str or "").replace("-", "").replace(" ", "")
+        terminacion = int(cuit_limpio[-1]) if cuit_limpio else -1
+    except:
+        terminacion = -1
+    grupos = {0: 1, 1: 1, 2: 2, 3: 2, 4: 3, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5}
+    return grupos.get(terminacion, 0)  # 0 = sin CUIT / no identificado
 
 
 def denied():
@@ -558,7 +571,9 @@ def actualizar_db():
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS envio_wa_facturas BOOLEAN DEFAULT FALSE",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsable_inscripto BOOLEAN DEFAULT FALSE",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS categoria_iibb TEXT DEFAULT 'B'",
         "UPDATE clientes SET activo=TRUE WHERE activo IS NULL",
+        "UPDATE clientes SET categoria_iibb='B' WHERE categoria_iibb IS NULL",
     ]:
         try: c.execute(ddl)
         except: conn.rollback()
@@ -1819,6 +1834,8 @@ CONDICIONES_FISCALES = [
     "Responsable Inscripto","Monotributista","Exento","No Responsable",
     "Consumidor Final","Sujeto No Categorizado","Proveedor del Exterior"
 ]
+# Categoria de Ingresos Brutos (Rentas Sgo. del Estero): A vence el 18, B vence el 15 de cada mes
+CATEGORIAS_IIBB = ["A","B"]
 
 @app.route("/clientes", methods=["GET","POST"])
 @login_req
@@ -1832,11 +1849,13 @@ def clientes():
         abono=request.form.get("abono",0) or 0
         condicion=request.form.get("condicion_fiscal","Responsable Inscripto")
         actividad=request.form.get("actividad","").strip()
+        cat_iibb=request.form.get("categoria_iibb","B")
+        if cat_iibb not in CATEGORIAS_IIBB: cat_iibb="B"
         ri = condicion == "Responsable Inscripto"
         wa_fact = request.form.get("envio_wa_facturas","0")=="1"
-        c.execute("""INSERT INTO clientes(nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas)
-                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact))
+        c.execute("""INSERT INTO clientes(nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,categoria_iibb)
+                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,cat_iibb))
         conn.commit()
         periodo=datetime.now().strftime("%m/%Y")
         c.execute("SELECT id FROM clientes WHERE nombre=%s ORDER BY id DESC LIMIT 1",(nombre,))
@@ -1848,22 +1867,23 @@ def clientes():
 
     tab_cl=request.args.get("tab","activos")
     if tab_cl=="baja":
-        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas FROM clientes WHERE activo=FALSE ORDER BY nombre")
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas,categoria_iibb FROM clientes WHERE activo=FALSE ORDER BY nombre")
     else:
-        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas,categoria_iibb FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
     data_raw=c.fetchall()
     # count baja
     c.execute("SELECT COUNT(*) FROM clientes WHERE activo=FALSE");n_baja=c.fetchone()[0]
     conn.close();es_admin=session.get("rol")=="admin"
     rows=""
     for d in data_raw:
-        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f,notas_raw=d
+        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f,notas_raw,cat_iibb=d
         notas_attr=(notas_raw or "").replace("&","&amp;").replace(chr(34),"&quot;").replace("<","&lt;").replace(chr(10),"&#10;")
         nombre_attr=(nombre or "").replace("&","&amp;").replace(chr(34),"&quot;")
         cuit_d=dec(cuit_enc);tel_d=dec(tel_enc);email_d=dec(email_enc)
         cuit_limpio=(cuit_d or "").replace("-","").replace(" ","")
         cond_color={"Responsable Inscripto":"#185FA5","Monotributista":"#1D9E75","Exento":"#7B68EE"}.get(condicion or "","#888")
         cond_badge=f'<span style="font-size:.65rem;padding:2px 6px;border-radius:8px;background:#f0f4ff;color:{cond_color};font-weight:700">{condicion or "---"}</span>'
+        cat_iibb_badge=f'<span style="font-size:.62rem;padding:1px 6px;border-radius:8px;background:#f5eefc;color:#6a1b9a;font-weight:700;margin-left:4px" title="Categoria Ingresos Brutos">IIBB {cat_iibb or "B"}</span>'
         ri_icon="🟢 " if ri else ""
         wa_icon='<span title="Recibe WA facturas" style="font-size:.8rem"> 📱</span>' if wa_f else ""
         btn_arca=('<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar ARCA">ARCA</a>'
@@ -1880,7 +1900,7 @@ def clientes():
             btn_del='<a href="/baja_cliente/'+str(cid)+'" class="btn btn-xs btn-o" title="Dar de baja">Dar de baja</a>'
         rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
           <td class="nm">{nombre}{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
-          <td class="mu">{cuit_d or "---"}<br>{cond_badge}</td>
+          <td class="mu">{cuit_d or "---"}<br>{cond_badge}{cat_iibb_badge}</td>
           <td class="mu">{tel_d or "---"}</td>
           <td class="mu">{email_d or "---"}</td>
           <td>{fmt(abono or 0)}</td>
@@ -1896,6 +1916,7 @@ def clientes():
                   +' <a href="/wa_facturas_preview?tipo=facturas" class="btn btn-wa btn-sm">📂 WA Facturas</a>'
                   +' <a href="/wa_facturas_preview?tipo=cobro" class="btn btn-wa btn-sm">💰 WA Cobros</a>')
     cond_opts="".join(f'<option value="{cf}">{cf}</option>' for cf in CONDICIONES_FISCALES)
+    cat_iibb_opts="".join(f'<option value="{ci}">{ci}</option>' for ci in CATEGORIAS_IIBB)
     modal='<div class="mo" id="mb"><div class="modal"><h3>Eliminar cliente?</h3><p class="msub" id="mb-nm"></p><p style="font-size:.81rem;color:var(--muted)">Se eliminan todos sus registros.</p><div class="mact"><button class="btn btn-o" onclick="closeM(&apos;mb&apos;)">Cancelar</button><a id="mb-ok" href="#" class="btn btn-r">Eliminar</a></div></div></div>' if es_admin else ""
     modal += '''<div class="mo" id="mnotas"><div class="modal">
       <h3>📝 Notas del cliente</h3>
@@ -1936,6 +1957,7 @@ def clientes():
         <div class="fg"><label>Nombre / Razón Social</label><input name="nombre" required placeholder="Garcia Juan"></div>
         <div class="fg"><label>CUIT</label><input name="cuit" placeholder="20-12345678-9" id="cuit-inp"></div>
         <div class="fg"><label>Condición Fiscal</label><select name="condicion_fiscal">{cond_opts}</select></div>
+        <div class="fg"><label>Categoría IIBB (Rentas Sgo.)</label><select name="categoria_iibb">{cat_iibb_opts}</select></div>
         <div class="fg"><label>Actividad Principal</label><input name="actividad" placeholder="Ej: Comercio minorista ropa"></div>
         <div class="fg"><label>Teléfono WhatsApp (sin 0 ni 15)</label><input name="telefono" placeholder="3855123456" id="tel-inp"></div>
         <div class="fg"><label>Email</label><input name="email" type="email" placeholder="cliente@email.com"></div>
@@ -2027,20 +2049,25 @@ def editar_cliente(id):
         actividad=request.form.get("actividad","").strip()
         ri = condicion == "Responsable Inscripto"
         wa_fact = request.form.get("envio_wa_facturas","0")=="1"
+        cat_iibb=request.form.get("categoria_iibb","B")
+        if cat_iibb not in CATEGORIAS_IIBB: cat_iibb="B"
         c.execute("""UPDATE clientes SET nombre=%s,cuit=%s,telefono=%s,email=%s,abono=%s,
-                     condicion_fiscal=%s,actividad=%s,responsable_inscripto=%s,envio_wa_facturas=%s
+                     condicion_fiscal=%s,actividad=%s,responsable_inscripto=%s,envio_wa_facturas=%s,
+                     categoria_iibb=%s
                      WHERE id=%s""",
-                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,id))
+                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,cat_iibb,id))
         conn.commit()
         registrar_auditoria("EDICION CLIENTE",f"Actualizado {nombre} | {condicion}",id,nombre)
         conn.close();return redirect("/clientes")
-    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas FROM clientes WHERE id=%s",(id,))
+    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,categoria_iibb FROM clientes WHERE id=%s",(id,))
     d=c.fetchone();conn.close()
     if not d: return redirect("/clientes")
     cuit_d=dec(d[2]);tel_d=dec(d[3]);email_d=dec(d[4])
     condicion=d[6] or "Responsable Inscripto";actividad=d[7] or "";ri=d[8];wa_f=d[9]
+    cat_iibb_actual=d[10] or "B"
     cuit_limpio=(cuit_d or "").replace("-","").replace(" ","")
     cond_opts="".join(f'<option value="{cf}" {"selected" if cf==condicion else ""}>{cf}</option>' for cf in CONDICIONES_FISCALES)
+    cat_iibb_opts="".join(f'<option value="{ci}" {"selected" if ci==cat_iibb_actual else ""}>{ci}</option>' for ci in CATEGORIAS_IIBB)
     wa_checked="checked" if wa_f else ""
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Volver a Clientes</a>
@@ -2055,6 +2082,7 @@ def editar_cliente(id):
         <div class="fg"><label>Nombre / Razón Social</label><input name="nombre" value="{d[1] or ""}" required></div>
         <div class="fg"><label>CUIT</label><input name="cuit" value="{cuit_d or ""}"></div>
         <div class="fg"><label>Condición Fiscal</label><select name="condicion_fiscal">{cond_opts}</select></div>
+        <div class="fg"><label>Categoría IIBB (Rentas Sgo.)</label><select name="categoria_iibb">{cat_iibb_opts}</select></div>
         <div class="fg"><label>Actividad Principal</label><input name="actividad" value="{actividad}" placeholder="Ej: Comercio minorista ropa"></div>
         <div class="fg"><label>Teléfono WhatsApp</label><input name="telefono" value="{tel_d or ""}"></div>
         <div class="fg"><label>Email</label><input name="email" type="email" value="{email_d or ""}"></div>
@@ -3427,7 +3455,52 @@ def caja():
     else:
         # Secretaria solo ve su propio historial (sin acumular dias anteriores en totales)
         c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre,detalle_pagos FROM cierres_caja WHERE usuario=%s AND fecha=%s ORDER BY id DESC LIMIT 5",(usuario,fecha_hoy))
-    cierres=c.fetchall(); conn.close()
+    cierres=c.fetchall()
+
+    # Admin: movimiento real de caja dia por dia, aunque el secretario no haya cerrado,
+    # + alerta de cajas pendientes de cierre.
+    movimiento_dias_html=""
+    alertas_pendientes_html=""
+    if rol=="admin":
+        c.execute("""SELECT DISTINCT SUBSTRING(fecha,1,10) fd, emitido_por FROM pagos
+                     WHERE emitido_por IS NOT NULL AND fecha NOT LIKE %s
+                     ORDER BY fd DESC LIMIT 120""",('%01/01/2000%',))
+        dias_usuarios=c.fetchall()
+        c.execute("SELECT fecha,usuario FROM cierres_caja WHERE cerrado=TRUE")
+        cerrados_set={(r[0],r[1]) for r in c.fetchall()}
+        filas_mov=""
+        pendientes=[]
+        for fd,uemi in dias_usuarios:
+            if not fd or not uemi: continue
+            t=_totales_caja(fd,uemi)
+            if t["_total"]<=0: continue
+            cerrado_ok=(fd,uemi) in cerrados_set
+            if not cerrado_ok and fd!=fecha_hoy:
+                pendientes.append((fd,uemi,t["_total"]))
+            if cerrado_ok:
+                est_mov='<span class="estado-cerrada">Cerrada</span>'
+            elif fd==fecha_hoy:
+                est_mov='<span class="estado-abierta">En curso</span>'
+            else:
+                est_mov='<span class="estado-abierta" style="background:#fdecea;color:#c0392b">Sin cerrar</span>'
+            its_mov=(_ci("Efectivo",t["Efectivo"],"#27AE60","min-width:68px;padding:4px 7px")+
+                      _ci("Cheque",t["Cheque"],"#2475B0","min-width:68px;padding:4px 7px")+
+                      _ci("U$S",t["Dolares"],"#E67E22","min-width:68px;padding:4px 7px")+
+                      _ci("Natasha",t["Transf. Natasha"],"#1A3A2A","min-width:68px;padding:4px 7px")+
+                      _ci("Maira",t["Transf. Maira"],"#7B68EE","min-width:68px;padding:4px 7px")+
+                      _ci("TOTAL",t["_total"],"#C8A96E","min-width:76px;padding:4px 7px;border:2px solid var(--accent)"))
+            filas_mov+=(f'<div class="caja-row"><div class="caja-header">'
+                        f'<div><span class="caja-user">{uemi}</span><span class="caja-fecha"> · {fd}</span></div>{est_mov}</div>'
+                        f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its_mov}</div></div>')
+        if pendientes:
+            items_pend="".join(f"<li>{u} — {fd} · {fmt(tot)}</li>" for fd,u,tot in pendientes[:20])
+            alertas_pendientes_html=(f'<div class="warn-box" style="margin-bottom:16px">'
+                f'<b>⚠ Caja pendiente de cerrar ({len(pendientes)}):</b>'
+                f'<ul style="margin:6px 0 0 18px;padding:0">{items_pend}</ul></div>')
+        movimiento_dias_html=(f'<div class="fcard" style="margin-bottom:16px"><h3>📅 Movimiento diario real</h3>'
+            f'<p style="color:var(--muted);font-size:.8rem;margin-bottom:10px">Se arma directamente desde los cobros cargados, aunque el secretario se haya olvidado de cerrar la caja ese dia.</p>'
+            f'{filas_mov or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin movimientos</p>"}</div>')
+    conn.close()
 
     # Items caja hoy - todos los medios siempre visibles
     items_hoy = (
@@ -3579,6 +3652,7 @@ def caja():
     body=(f'<h1 class="page-title">Caja Diaria</h1>'
           f'<p class="page-sub">Cobros del dia — {usuario} · {fecha_hoy}</p>'
           f'{flash}'
+          f'{alertas_pendientes_html if rol=="admin" else ""}'
           f'<div class="fcard" style="margin-bottom:16px">'
           f'<div style="display:flex;justify-content:space-between;align-items:center;'
           f'margin-bottom:14px;flex-wrap:wrap;gap:8px">'
@@ -3588,6 +3662,7 @@ def caja():
           f'{btn_cierre}'
           f'</div>'
           f'{cajas_live if rol=="admin" else ""}'
+          f'{movimiento_dias_html if rol=="admin" else ""}'
           f'{tabla_cobros}'
           f'<div class="fcard"><h3>Historial de cierres</h3>'
           f'{cierre_html or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin cierres</p>"}'
@@ -3605,23 +3680,74 @@ def caja():
 #  REPORTES
 # ══════════════════════════════════════════════════════════════════════════════
 @app.route("/reportes")
-@admin_req
+@login_req
 def reportes():
+    rol=session.get("rol")
+    if rol=="supervisor": return denied()
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT periodo,COALESCE(SUM(debe),0),COALESCE(SUM(haber),0),COALESCE(SUM(debe-haber),0) FROM cuentas GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC LIMIT 20")
-    por_mes=c.fetchall()
-    c.execute("SELECT cl.nombre,SUM(cu.debe),SUM(cu.haber),SUM(cu.debe-cu.haber) d FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id GROUP BY cl.nombre ORDER BY SUM(cu.debe-cu.haber) DESC LIMIT 20")
-    ranking=c.fetchall()
-    c.execute("SELECT medio,SUM(monto),COUNT(*) FROM pagos GROUP BY medio ORDER BY SUM(monto) DESC")
-    por_medio=c.fetchall()
-    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Natasha%'");nat=c.fetchone()[0]
-    c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Maira%'");mai=c.fetchone()[0]
-    c.execute("SELECT categoria,SUM(monto) FROM gastos GROUP BY categoria ORDER BY SUM(monto) DESC")
-    gastos_cat=c.fetchall()
-    c.execute("SELECT fecha,usuario,accion,detalle,cliente_nombre FROM auditoria ORDER BY id DESC LIMIT 100")
-    auditoria=c.fetchall()
-    c.execute("SELECT nombre FROM clientes WHERE abono IS NULL OR abono=0 ORDER BY nombre")
-    sin_abono=c.fetchall();conn.close()
+    if rol=="admin":
+        c.execute("SELECT periodo,COALESCE(SUM(debe),0),COALESCE(SUM(haber),0),COALESCE(SUM(debe-haber),0) FROM cuentas GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC LIMIT 20")
+        por_mes=c.fetchall()
+        c.execute("SELECT cl.nombre,SUM(cu.debe),SUM(cu.haber),SUM(cu.debe-cu.haber) d FROM cuentas cu JOIN clientes cl ON cl.id=cu.cliente_id GROUP BY cl.nombre ORDER BY SUM(cu.debe-cu.haber) DESC LIMIT 20")
+        ranking=c.fetchall()
+        c.execute("SELECT medio,SUM(monto),COUNT(*) FROM pagos GROUP BY medio ORDER BY SUM(monto) DESC")
+        por_medio=c.fetchall()
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Natasha%'");nat=c.fetchone()[0]
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE medio ILIKE '%Maira%'");mai=c.fetchone()[0]
+        c.execute("SELECT categoria,SUM(monto) FROM gastos GROUP BY categoria ORDER BY SUM(monto) DESC")
+        gastos_cat=c.fetchall()
+        c.execute("SELECT fecha,usuario,accion,detalle,cliente_nombre FROM auditoria ORDER BY id DESC LIMIT 100")
+        auditoria=c.fetchall()
+        c.execute("SELECT nombre FROM clientes WHERE abono IS NULL OR abono=0 ORDER BY nombre")
+        sin_abono=c.fetchall()
+    else:
+        por_mes=[];ranking=[];por_medio=[];nat=0;mai=0;gastos_cat=[];auditoria=[];sin_abono=[]
+    c.execute("""SELECT nombre,cuit,condicion_fiscal,responsable_inscripto,categoria_iibb
+                 FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre""")
+    clientes_iva_iibb=c.fetchall()
+    conn.close()
+
+    # ── Control IVA: Responsables Inscriptos, agrupados por vencimiento segun CUIT ──
+    ri_grupos={1:[],2:[],3:[],4:[],5:[],0:[]}
+    for nombre,cuit_enc,condicion,ri,cat_iibb in clientes_iva_iibb:
+        if condicion=="Responsable Inscripto" or ri:
+            cuit_d=dec(cuit_enc) if cuit_enc else ""
+            g=grupo_vto_iva(cuit_d)
+            ri_grupos[g].append((nombre,cuit_d))
+    GRUPO_LBL={1:"1er Vencimiento (CUIT term. 0-1)",2:"2do Vencimiento (CUIT term. 2-3)",
+               3:"3er Vencimiento (CUIT term. 4-5)",4:"4to Vencimiento (CUIT term. 6-7)",
+               5:"5to Vencimiento (CUIT term. 8-9)",0:"Sin CUIT cargado"}
+    filas_iva=""
+    total_ri=0
+    for g in [1,2,3,4,5,0]:
+        lista=sorted(ri_grupos[g])
+        if not lista: continue
+        total_ri+=len(lista)
+        filas_iva+=f'<tr class="grupo-row"><td colspan="2" style="background:#f0f4ff;font-weight:700;color:var(--info);font-size:.78rem;padding:8px 10px">{GRUPO_LBL[g]} &middot; {len(lista)} cliente(s)</td></tr>'
+        for nombre,cuit_d in lista:
+            filas_iva+=f'<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td></tr>'
+
+    # ── Control Ingresos Brutos: Resp. Inscriptos y Monotributistas, por Categoria A/B ──
+    cat_a=[];cat_b=[]
+    for nombre,cuit_enc,condicion,ri,cat_iibb in clientes_iva_iibb:
+        if condicion in ("Responsable Inscripto","Monotributista"):
+            cuit_d=dec(cuit_enc) if cuit_enc else ""
+            item=(nombre,cuit_d,condicion)
+            if (cat_iibb or "B")=="A": cat_a.append(item)
+            else: cat_b.append(item)
+    cat_a.sort();cat_b.sort()
+    def _filas_iibb(lista):
+        f=""
+        for nombre,cuit_d,condicion in lista:
+            cond_bg="#e8f0fb" if condicion=="Responsable Inscripto" else "#e8f7ef"
+            cond_col="#185FA5" if condicion=="Responsable Inscripto" else "#1D9E75"
+            cond_lbl="R.I." if condicion=="Responsable Inscripto" else "Mono."
+            f+=f'''<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td>
+                <td><span style="font-size:.65rem;padding:2px 7px;border-radius:8px;background:{cond_bg};color:{cond_col};font-weight:700">{cond_lbl}</span></td></tr>'''
+        return f
+    filas_iibb_a=_filas_iibb(cat_a)
+    filas_iibb_b=_filas_iibb(cat_b)
+
     filas_mes="".join(f'<tr><td class="nm">{r[0]}</td><td>{fmt(r[1])}</td><td style="color:var(--success);font-weight:600">{fmt(r[2])}</td><td style="color:{"var(--danger)" if (r[3] or 0)>0 else "var(--success)"};font-weight:600">{fmt(r[3] or 0)}</td></tr>' for r in por_mes)
     filas_rank="".join(f'<tr><td class="nm">{r[0]}</td><td>{fmt(r[1])}</td><td style="color:var(--success)">{fmt(r[2])}</td><td style="color:{"var(--danger)" if (r[3] or 0)>0 else "var(--success)"}"><b>{fmt(r[3] or 0)}</b></td></tr>' for r in ranking)
     filas_medio="".join(f'<tr><td class="nm"><span class="bmedio">{r[0]}</span></td><td style="font-weight:600;color:var(--success)">{fmt(r[1])}</td><td class="mu">{r[2]} pagos</td></tr>' for r in por_medio)
@@ -3629,7 +3755,35 @@ def reportes():
     filas_aud="".join(f'<div class="logrow"><div class="log-dot"></div><span class="log-time">{a[0]}</span><span class="log-user">{a[1]}</span><span class="log-msg"><b>{a[2]}</b>{" - "+a[4] if a[4] else ""} - {a[3]}</span></div>' for a in auditoria)
     sin_ab=f'<div class="warn-box">{len(sin_abono)} clientes sin honorarios: {", ".join(s[0] for s in sin_abono[:12])}</div>' if sin_abono else ""
     total_s=nat+mai;pct_nat=int(nat/total_s*100) if total_s>0 else 50;pct_mai=100-pct_nat
-    body=f"""
+
+    # Bloques Control IVA / Control Ingresos Brutos (visibles para admin y secretarias)
+    tabs_civa_html=f'''
+    <div id="t6" class="tabpanel{" on" if rol!="admin" else ""}">
+      <div class="fcard" style="margin-bottom:14px">
+        <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">Responsables Inscriptos ({total_ri}) agrupados por orden de vencimiento de IVA (F.731) segun terminación de CUIT, siguiendo el cronograma general de AFIP (5 grupos escalonados en la misma semana del mes siguiente).</p>
+        <a href="/iva" class="btn btn-o btn-sm">Ir a Carga de IVA / IIBB mensual</a>
+      </div>
+      <div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th></tr></thead><tbody>{filas_iva or "<tr><td colspan=2 style='color:var(--muted);text-align:center;padding:20px'>Sin responsables inscriptos cargados</td></tr>"}</tbody></table></div>
+    </div>
+    <div id="t7" class="tabpanel">
+      <div class="fcard" style="margin-bottom:14px">
+        <p style="font-size:.84rem;color:var(--muted)">Ingresos Brutos (Rentas Sgo. del Estero) — <b>Categoría A</b> vence el 18 de cada mes, <b>Categoría B</b> vence el 15 de cada mes. Incluye Responsables Inscriptos y Monotributistas segun la Categoría IIBB cargada en la ficha de cada cliente.</p>
+      </div>
+      <div class="tabs" style="margin-bottom:10px">
+        <button class="tab subtab on" onclick="showSub('sa',this)">Categoría A · vence 18 ({len(cat_a)})</button>
+        <button class="tab subtab" onclick="showSub('sb',this)">Categoría B · vence 15 ({len(cat_b)})</button>
+      </div>
+      <div id="sa" class="subpanel on"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th></tr></thead><tbody>{filas_iibb_a or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin clientes en Categoría A</td></tr>"}</tbody></table></div></div>
+      <div id="sb" class="subpanel" style="display:none"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th></tr></thead><tbody>{filas_iibb_b or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin clientes en Categoría B</td></tr>"}</tbody></table></div></div>
+    </div>
+    <script>
+    function showTab(id,btn){{document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab:not(.subtab)').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}}
+    function showSub(id,btn){{document.querySelectorAll('.subpanel').forEach(p=>{{p.classList.remove('on');p.style.display='none'}});document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');document.getElementById(id).style.display='';btn.classList.add('on')}}
+    </script>
+    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>'''
+
+    if rol=="admin":
+        body=f"""
     <h1 class="page-title">Reportes</h1><p class="page-sub">Resúmenes financieros y auditoría</p>{sin_ab}
     <div class="fcard"><h3>Distribución entre Socias</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px" class="twocol">
@@ -3655,14 +3809,15 @@ def reportes():
       <button class="tab" onclick="showTab('t3',this)">Medios de Pago</button>
       <button class="tab" onclick="showTab('t4',this)">Gastos</button>
       <button class="tab" onclick="showTab('t5',this)">Auditoría</button>
+      <button class="tab" onclick="showTab('t6',this)">Control IVA</button>
+      <button class="tab" onclick="showTab('t7',this)">Control Ingresos Brutos</button>
     </div>
     <div id="t1" class="tabpanel on"><div class="dtable"><table><thead><tr><th>Periodo</th><th>Facturado</th><th>Cobrado</th><th>Deuda</th></tr></thead><tbody>{filas_mes or "<tr><td colspan=4 style='color:var(--muted);text-align:center;padding:20px'>Sin datos</td></tr>"}</tbody></table></div></div>
     <div id="t2" class="tabpanel"><div class="dtable"><table><thead><tr><th>Cliente</th><th>Facturado</th><th>Cobrado</th><th>Saldo</th></tr></thead><tbody>{filas_rank or "<tr><td colspan=4 style='color:var(--muted);text-align:center;padding:20px'>Sin datos</td></tr>"}</tbody></table></div></div>
     <div id="t3" class="tabpanel"><div class="dtable"><table><thead><tr><th>Medio</th><th>Total</th><th>Cant.</th></tr></thead><tbody>{filas_medio or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin datos</td></tr>"}</tbody></table></div></div>
     <div id="t4" class="tabpanel"><div class="dtable"><table><thead><tr><th>Categoría</th><th>Total</th></tr></thead><tbody>{filas_gastos or "<tr><td colspan=2 style='color:var(--muted);text-align:center;padding:20px'>Sin gastos</td></tr>"}</tbody></table></div></div>
     <div id="t5" class="tabpanel"><div class="fcard"><h3>Registro completo</h3>{filas_aud or "<p style='color:var(--muted);font-size:.84rem'>Sin actividad</p>"}</div></div>
-    <script>function showTab(id,btn){{document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}}</script>
-    <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>
+    {tabs_civa_html}
     <div class="fcard" style="margin-top:20px">
       <h3>📥 Exportar Reportes</h3>
       <p style="color:var(--muted);font-size:.83rem;margin-bottom:14px">Descargá los datos en Excel o PDF para usar en tu computadora o enviar por mail.</p>
@@ -3675,7 +3830,16 @@ def reportes():
         <a href="/exportar/pdf/deudores" class="btn btn-r">📄 PDF - Deudores</a>
       </div>
     </div>"""
-    return page("Reportes",body,"Reportes")
+    else:
+        body=f"""
+    <h1 class="page-title">Control IVA / Ingresos Brutos</h1>
+    <p class="page-sub">Responsables Inscriptos y Monotributistas de la ficha de Clientes</p>
+    <div class="tabs">
+      <button class="tab on" onclick="showTab('t6',this)">Control IVA</button>
+      <button class="tab" onclick="showTab('t7',this)">Control Ingresos Brutos</button>
+    </div>
+    {tabs_civa_html}"""
+    return page("Reportes",body,"Reportes" if rol=="admin" else "Control IVA/IIBB")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  EXPORTACIONES EXCEL y PDF
@@ -4672,19 +4836,14 @@ def tareas():
     filtro_est=request.args.get("est","activas")
     editar_id=request.args.get("editar","")
 
-    # Para admin: ve todas; para secretaria: las propias o asignadas
-    if rol=="admin":
-        if filtro_est=="completadas":
-            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE estado='completada' ORDER BY fecha_actualizacion DESC LIMIT 50")
-        elif filtro_est=="todas":
-            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,fecha_actualizacion DESC")
-        else:
-            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE estado!='completada' ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END")
+    # Todas las secretarias y el admin ven las mismas tareas (cargadas por cualquiera del equipo),
+    # asi estan al tanto de lo que ya se hizo y lo que falta.
+    if filtro_est=="completadas":
+        c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE estado='completada' ORDER BY fecha_actualizacion DESC LIMIT 50")
+    elif filtro_est=="todas" and rol=="admin":
+        c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,fecha_actualizacion DESC")
     else:
-        if filtro_est=="completadas":
-            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE (asignado_a=%s OR usuario=%s) AND estado='completada' ORDER BY fecha_actualizacion DESC",(usuario,usuario))
-        else:
-            c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE (asignado_a=%s OR usuario=%s) AND estado!='completada' ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END",(usuario,usuario))
+        c.execute("SELECT id,titulo,descripcion,usuario,asignado_a,estado,prioridad,fecha_creacion,fecha_actualizacion,fecha_vencimiento FROM tareas WHERE estado!='completada' ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END")
 
     lista=c.fetchall()
 
@@ -4765,7 +4924,7 @@ def tareas():
     n_act=len([t for t in lista if t[5]!="completada"])
     body=f"""
     <h1 class="page-title">Agenda de Tareas</h1>
-    <p class="page-sub">{len(lista)} tareas · {"Todas las secretarias" if rol=="admin" else "Mis tareas"}</p>
+    <p class="page-sub">{len(lista)} tareas · Vista compartida de todo el equipo</p>
     {flash}
     {tabs}
     {form_html}
