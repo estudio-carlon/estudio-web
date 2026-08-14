@@ -5650,5 +5650,8 @@ def api_cierres_por_mes():
     from flask import jsonify
     return jsonify({"labels":[r[0] for r in rows],"totales":[float(r[1] or 0) for r in rows]})
 
+from iva_module import register_iva
+register_iva(app)
+
 if __name__=="__main__":
-    app.run(debug=True)
+        app.run(debug=True)
