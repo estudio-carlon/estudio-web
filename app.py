@@ -2035,6 +2035,17 @@ def guardar_nota(cliente_id):
     registrar_auditoria("NOTA CLIENTE","Nota actualizada",cliente_id)
     return jsonify({"ok":True})
 
+@app.route("/cliente/<int:id>/categoria_iibb", methods=["POST"])
+@login_req
+def actualizar_categoria_iibb(id):
+    nueva = request.form.get("categoria_iibb", "B")
+    if nueva not in CATEGORIAS_IIBB: nueva = "B"
+    conn = conectar(); c = conn.cursor()
+    c.execute("UPDATE clientes SET categoria_iibb=%s WHERE id=%s", (nueva, id))
+    conn.commit(); conn.close()
+    registrar_auditoria("EDICION CLIENTE", f"Categoria IIBB actualizada a {nueva}", id)
+    return jsonify({"ok": True, "categoria": nueva})
+
 @app.route("/editar_cliente/<int:id>", methods=["GET","POST"])
 @login_req
 def editar_cliente(id):
@@ -3702,18 +3713,45 @@ def reportes():
         sin_abono=c.fetchall()
     else:
         por_mes=[];ranking=[];por_medio=[];nat=0;mai=0;gastos_cat=[];auditoria=[];sin_abono=[]
-    c.execute("""SELECT nombre,cuit,condicion_fiscal,responsable_inscripto,categoria_iibb
+    c.execute("""SELECT id,nombre,cuit,condicion_fiscal,responsable_inscripto,categoria_iibb
                  FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre""")
     clientes_iva_iibb=c.fetchall()
+    mes_act,anio_act=now_ar_dt().month,now_ar_dt().year
+    c.execute("""SELECT cliente_id,debito_fiscal,credito_fiscal,saldo_anterior,saldo_libre_disponibilidad,
+                 retenciones_percepciones,neto_ventas_comprobantes,liquidaciones_hacienda,liquidaciones_grano,
+                 notas_credito_iibb,alicuota_iibb
+                 FROM iva_control WHERE mes=%s AND anio=%s""",(mes_act,anio_act))
+    iva_periodo={r[0]: r for r in c.fetchall()}
     conn.close()
+
+    def _calc_periodo(cid):
+        """Devuelve (saldo_final_iva, neto_facturado_iibb, impuesto_estimado_iibb) del periodo actual, o None si no hay carga."""
+        d=iva_periodo.get(cid)
+        if not d: return None,None,None
+        (_,deb,cred,saldo_ant,saldo_libre,ret_perc,comprobantes,liq_hac,liq_gra,nc_iibb,alicuota)=d
+        saldo_final=(cred or 0)+(saldo_ant or 0)+(saldo_libre or 0)+(ret_perc or 0)-(deb or 0)
+        neto_fact=(comprobantes or 0)+(liq_hac or 0)+(liq_gra or 0)-(nc_iibb or 0)
+        impuesto_est=neto_fact*((alicuota or 0)/100)
+        return saldo_final,neto_fact,impuesto_est
+
+    def _badge_posicion_iva(saldo_final):
+        if saldo_final is None:
+            return '<span class="badge bpar">Sin cargar</span>'
+        if saldo_final>0: return f'<span class="badge bp">Saldo a favor {fmt(saldo_final)}</span>'
+        if saldo_final<0: return f'<span class="badge bd">IVA a pagar {fmt(abs(saldo_final))}</span>'
+        return '<span class="badge bpar">Sin saldo</span>'
+
+    def _cat_select(cid, cat_actual):
+        opts="".join(f'<option value="{ci}" {"selected" if ci==(cat_actual or "B") else ""}>{ci}</option>' for ci in CATEGORIAS_IIBB)
+        return f'<select class="catIibbSel" data-cid="{cid}" style="font-size:.72rem;padding:2px 4px;border-radius:6px;border:1px solid var(--border)">{opts}</select>'
 
     # ── Control IVA: Responsables Inscriptos, agrupados por vencimiento segun CUIT ──
     ri_grupos={1:[],2:[],3:[],4:[],5:[],0:[]}
-    for nombre,cuit_enc,condicion,ri,cat_iibb in clientes_iva_iibb:
+    for cid,nombre,cuit_enc,condicion,ri,cat_iibb in clientes_iva_iibb:
         if condicion=="Responsable Inscripto" or ri:
             cuit_d=dec(cuit_enc) if cuit_enc else ""
             g=grupo_vto_iva(cuit_d)
-            ri_grupos[g].append((nombre,cuit_d))
+            ri_grupos[g].append((nombre,cuit_d,cid))
     GRUPO_LBL={1:"1er Vencimiento (CUIT term. 0-1)",2:"2do Vencimiento (CUIT term. 2-3)",
                3:"3er Vencimiento (CUIT term. 4-5)",4:"4to Vencimiento (CUIT term. 6-7)",
                5:"5to Vencimiento (CUIT term. 8-9)",0:"Sin CUIT cargado"}
@@ -3723,30 +3761,35 @@ def reportes():
         lista=sorted(ri_grupos[g])
         if not lista: continue
         total_ri+=len(lista)
-        filas_iva+=f'<tr class="grupo-row"><td colspan="2" style="background:#f0f4ff;font-weight:700;color:var(--info);font-size:.78rem;padding:8px 10px">{GRUPO_LBL[g]} &middot; {len(lista)} cliente(s)</td></tr>'
-        for nombre,cuit_d in lista:
-            filas_iva+=f'<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td></tr>'
+        filas_iva+=f'<tr class="grupo-row"><td colspan="3" style="background:#f0f4ff;font-weight:700;color:var(--info);font-size:.78rem;padding:8px 10px">{GRUPO_LBL[g]} &middot; {len(lista)} cliente(s)</td></tr>'
+        for nombre,cuit_d,cid in lista:
+            saldo_final,_,_=_calc_periodo(cid)
+            filas_iva+=f'<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td><td>{_badge_posicion_iva(saldo_final)}</td></tr>'
 
-    # ── Control Ingresos Brutos: Resp. Inscriptos y Monotributistas, por Categoria A/B ──
-    cat_a=[];cat_b=[]
-    for nombre,cuit_enc,condicion,ri,cat_iibb in clientes_iva_iibb:
-        if condicion in ("Responsable Inscripto","Monotributista"):
+    # ── Control Ingresos Brutos: Resp. Inscriptos por un lado, Monotributistas por otro ──
+    lista_ri_iibb=[];lista_mono_iibb=[]
+    for cid,nombre,cuit_enc,condicion,ri,cat_iibb in clientes_iva_iibb:
+        if condicion=="Responsable Inscripto" or ri:
             cuit_d=dec(cuit_enc) if cuit_enc else ""
-            item=(nombre,cuit_d,condicion)
-            if (cat_iibb or "B")=="A": cat_a.append(item)
-            else: cat_b.append(item)
-    cat_a.sort();cat_b.sort()
-    def _filas_iibb(lista):
+            lista_ri_iibb.append((nombre,cuit_d,cid,cat_iibb))
+        elif condicion=="Monotributista":
+            cuit_d=dec(cuit_enc) if cuit_enc else ""
+            lista_mono_iibb.append((nombre,cuit_d,cid,cat_iibb))
+    lista_ri_iibb.sort();lista_mono_iibb.sort()
+    def _filas_iibb(lista,cond_lbl,cond_bg,cond_col):
         f=""
-        for nombre,cuit_d,condicion in lista:
-            cond_bg="#e8f0fb" if condicion=="Responsable Inscripto" else "#e8f7ef"
-            cond_col="#185FA5" if condicion=="Responsable Inscripto" else "#1D9E75"
-            cond_lbl="R.I." if condicion=="Responsable Inscripto" else "Mono."
+        for nombre,cuit_d,cid,cat_iibb in lista:
+            _,neto_fact,impuesto_est=_calc_periodo(cid)
+            neto_txt=fmt(neto_fact) if neto_fact is not None else "---"
+            imp_txt=fmt(impuesto_est) if impuesto_est is not None else "---"
             f+=f'''<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td>
-                <td><span style="font-size:.65rem;padding:2px 7px;border-radius:8px;background:{cond_bg};color:{cond_col};font-weight:700">{cond_lbl}</span></td></tr>'''
+                <td><span style="font-size:.65rem;padding:2px 7px;border-radius:8px;background:{cond_bg};color:{cond_col};font-weight:700">{cond_lbl}</span></td>
+                <td>{_cat_select(cid,cat_iibb)}</td>
+                <td class="mu">{neto_txt}</td>
+                <td style="font-weight:600">{imp_txt}</td></tr>'''
         return f
-    filas_iibb_a=_filas_iibb(cat_a)
-    filas_iibb_b=_filas_iibb(cat_b)
+    filas_iibb_ri=_filas_iibb(lista_ri_iibb,"R.I.","#e8f0fb","#185FA5")
+    filas_iibb_mono=_filas_iibb(lista_mono_iibb,"Mono.","#e8f7ef","#1D9E75")
 
     filas_mes="".join(f'<tr><td class="nm">{r[0]}</td><td>{fmt(r[1])}</td><td style="color:var(--success);font-weight:600">{fmt(r[2])}</td><td style="color:{"var(--danger)" if (r[3] or 0)>0 else "var(--success)"};font-weight:600">{fmt(r[3] or 0)}</td></tr>' for r in por_mes)
     filas_rank="".join(f'<tr><td class="nm">{r[0]}</td><td>{fmt(r[1])}</td><td style="color:var(--success)">{fmt(r[2])}</td><td style="color:{"var(--danger)" if (r[3] or 0)>0 else "var(--success)"}"><b>{fmt(r[3] or 0)}</b></td></tr>' for r in ranking)
@@ -3760,25 +3803,36 @@ def reportes():
     tabs_civa_html=f'''
     <div id="t6" class="tabpanel{" on" if rol!="admin" else ""}">
       <div class="fcard" style="margin-bottom:14px">
-        <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">Responsables Inscriptos ({total_ri}) agrupados por orden de vencimiento de IVA (F.731) segun terminación de CUIT, siguiendo el cronograma general de AFIP (5 grupos escalonados en la misma semana del mes siguiente).</p>
+        <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">Responsables Inscriptos ({total_ri}) agrupados por orden de vencimiento de IVA (F.731) segun terminación de CUIT, siguiendo el cronograma general de AFIP (5 grupos escalonados en la misma semana del mes siguiente). La posición de IVA es la del periodo actual ({MESES_ESP[mes_act]} {anio_act}).</p>
         <a href="/iva" class="btn btn-o btn-sm">Ir a Carga de IVA / IIBB mensual</a>
       </div>
-      <div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th></tr></thead><tbody>{filas_iva or "<tr><td colspan=2 style='color:var(--muted);text-align:center;padding:20px'>Sin responsables inscriptos cargados</td></tr>"}</tbody></table></div>
+      <div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Posición IVA</th></tr></thead><tbody>{filas_iva or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin responsables inscriptos cargados</td></tr>"}</tbody></table></div>
     </div>
     <div id="t7" class="tabpanel">
       <div class="fcard" style="margin-bottom:14px">
-        <p style="font-size:.84rem;color:var(--muted)">Ingresos Brutos (Rentas Sgo. del Estero) — <b>Categoría A</b> vence el 18 de cada mes, <b>Categoría B</b> vence el 15 de cada mes. Incluye Responsables Inscriptos y Monotributistas segun la Categoría IIBB cargada en la ficha de cada cliente.</p>
+        <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">Ingresos Brutos (Rentas Sgo. del Estero) — <b>Categoría A</b> vence el 18 de cada mes, <b>Categoría B</b> vence el 15. La categoría se puede cambiar aca mismo. Neto Facturado e Impuesto Estimado son del periodo actual ({MESES_ESP[mes_act]} {anio_act}).</p>
+        <a href="/iva" class="btn btn-o btn-sm">Ir a cargar IIBB mensual</a>
       </div>
       <div class="tabs" style="margin-bottom:10px">
-        <button class="tab subtab on" onclick="showSub('sa',this)">Categoría A · vence 18 ({len(cat_a)})</button>
-        <button class="tab subtab" onclick="showSub('sb',this)">Categoría B · vence 15 ({len(cat_b)})</button>
+        <button class="tab subtab on" onclick="showSub('sri',this)">Responsables Inscriptos ({len(lista_ri_iibb)})</button>
+        <button class="tab subtab" onclick="showSub('smo',this)">Monotributistas ({len(lista_mono_iibb)})</button>
       </div>
-      <div id="sa" class="subpanel on"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th></tr></thead><tbody>{filas_iibb_a or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin clientes en Categoría A</td></tr>"}</tbody></table></div></div>
-      <div id="sb" class="subpanel" style="display:none"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th></tr></thead><tbody>{filas_iibb_b or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin clientes en Categoría B</td></tr>"}</tbody></table></div></div>
+      <div id="sri" class="subpanel on"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th><th>Categoría</th><th>Neto Facturado</th><th>Impuesto Estimado</th></tr></thead><tbody>{filas_iibb_ri or "<tr><td colspan=6 style='color:var(--muted);text-align:center;padding:20px'>Sin Responsables Inscriptos</td></tr>"}</tbody></table></div></div>
+      <div id="smo" class="subpanel" style="display:none"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th><th>Categoría</th><th>Neto Facturado</th><th>Impuesto Estimado</th></tr></thead><tbody>{filas_iibb_mono or "<tr><td colspan=6 style='color:var(--muted);text-align:center;padding:20px'>Sin Monotributistas</td></tr>"}</tbody></table></div></div>
     </div>
     <script>
     function showTab(id,btn){{document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab:not(.subtab)').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}}
     function showSub(id,btn){{document.querySelectorAll('.subpanel').forEach(p=>{{p.classList.remove('on');p.style.display='none'}});document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');document.getElementById(id).style.display='';btn.classList.add('on')}}
+    document.addEventListener('change',function(e){{
+        var sel=e.target.closest('.catIibbSel');
+        if(!sel) return;
+        var cid=sel.dataset.cid, val=sel.value;
+        fetch('/cliente/'+cid+'/categoria_iibb',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:'categoria_iibb='+encodeURIComponent(val)}})
+          .then(r=>r.json()).then(function(d){{
+              sel.style.borderColor = d.ok ? 'var(--success)' : 'var(--danger)';
+              setTimeout(function(){{sel.style.borderColor='';}},1200);
+          }}).catch(function(){{sel.style.borderColor='var(--danger)';}});
+    }});
     </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>'''
 
