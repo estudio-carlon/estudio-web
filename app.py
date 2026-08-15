@@ -405,9 +405,9 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/ganancias","Ganancias"),("/bienes-personales","Bienes Personales"),("/participaciones-societarias","Part. Societarias"),("/pub","PUB"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/ganancias","Ganancias"),("/bienes-personales","Bienes Personales"),("/participaciones-societarias","Part. Societarias"),("/pub","PUB"),("/novedades","Novedades")]
+    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -3792,6 +3792,7 @@ def caja():
 def reportes():
     rol=session.get("rol")
     if rol=="supervisor": return denied()
+    tab_param=request.args.get("tab","")
     conn=conectar();c=conn.cursor()
     if rol=="admin":
         c.execute("SELECT periodo,COALESCE(SUM(debe),0),COALESCE(SUM(haber),0),COALESCE(SUM(debe-haber),0) FROM cuentas GROUP BY periodo ORDER BY SUBSTRING(periodo,4,4) DESC,SUBSTRING(periodo,1,2) DESC LIMIT 20")
@@ -3933,6 +3934,21 @@ def reportes():
     </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>'''
 
+    # Bloques de cumplimiento adicionales (Ganancias, Bienes Personales, Part. Societarias, PUB),
+    # embebidos como solapas dentro de Reportes (ya no son items sueltos del menu superior).
+    tabs_extra_html=f'''
+    <div id="t8" class="tabpanel">{app.frag_ganancias()}</div>
+    <div id="t9" class="tabpanel">{app.frag_bienes_personales()}</div>
+    <div id="t10" class="tabpanel">{app.frag_part_societarias()}</div>
+    <div id="t11" class="tabpanel">{app.frag_pub()}</div>
+    '''
+    tabs_extra_btns='''
+      <button class="tab" onclick="showTab('t8',this)">Control Ganancias</button>
+      <button class="tab" onclick="showTab('t9',this)">Control Bienes Personales</button>
+      <button class="tab" onclick="showTab('t10',this)">Part. Societarias</button>
+      <button class="tab" onclick="showTab('t11',this)">PUB</button>
+    '''
+
     if rol=="admin":
         body=f"""
     <h1 class="page-title">Reportes</h1><p class="page-sub">Resúmenes financieros y auditoría</p>{sin_ab}
@@ -3962,6 +3978,7 @@ def reportes():
       <button class="tab" onclick="showTab('t5',this)">Auditoría</button>
       <button class="tab" onclick="showTab('t6',this)">Control IVA</button>
       <button class="tab" onclick="showTab('t7',this)">Control Ingresos Brutos</button>
+      {tabs_extra_btns}
     </div>
     <div id="t1" class="tabpanel on"><div class="dtable"><table><thead><tr><th>Periodo</th><th>Facturado</th><th>Cobrado</th><th>Deuda</th></tr></thead><tbody>{filas_mes or "<tr><td colspan=4 style='color:var(--muted);text-align:center;padding:20px'>Sin datos</td></tr>"}</tbody></table></div></div>
     <div id="t2" class="tabpanel"><div class="dtable"><table><thead><tr><th>Cliente</th><th>Facturado</th><th>Cobrado</th><th>Saldo</th></tr></thead><tbody>{filas_rank or "<tr><td colspan=4 style='color:var(--muted);text-align:center;padding:20px'>Sin datos</td></tr>"}</tbody></table></div></div>
@@ -3969,6 +3986,7 @@ def reportes():
     <div id="t4" class="tabpanel"><div class="dtable"><table><thead><tr><th>Categoría</th><th>Total</th></tr></thead><tbody>{filas_gastos or "<tr><td colspan=2 style='color:var(--muted);text-align:center;padding:20px'>Sin gastos</td></tr>"}</tbody></table></div></div>
     <div id="t5" class="tabpanel"><div class="fcard"><h3>Registro completo</h3>{filas_aud or "<p style='color:var(--muted);font-size:.84rem'>Sin actividad</p>"}</div></div>
     {tabs_civa_html}
+    {tabs_extra_html}
     <div class="fcard" style="margin-top:20px">
       <h3>📥 Exportar Reportes</h3>
       <p style="color:var(--muted);font-size:.83rem;margin-bottom:14px">Descargá los datos en Excel o PDF para usar en tu computadora o enviar por mail.</p>
@@ -3988,8 +4006,23 @@ def reportes():
     <div class="tabs">
       <button class="tab on" onclick="showTab('t6',this)">Control IVA</button>
       <button class="tab" onclick="showTab('t7',this)">Control Ingresos Brutos</button>
+      {tabs_extra_btns}
     </div>
-    {tabs_civa_html}"""
+    {tabs_civa_html}
+    {tabs_extra_html}"""
+    if tab_param in ("t6","t7","t8","t9","t10","t11"):
+        body+=f'''<script>
+        (function(){{
+          var id="{tab_param}";
+          document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));
+          document.querySelectorAll('.tabs>.tab:not(.subtab)').forEach(b=>b.classList.remove('on'));
+          var panel=document.getElementById(id);
+          if(panel) panel.classList.add('on');
+          document.querySelectorAll('.tabs button').forEach(function(b){{
+            if(b.getAttribute('onclick')&&b.getAttribute('onclick').indexOf("'"+id+"'")!==-1) b.classList.add('on');
+          }});
+        }})();
+        </script>'''
     return page("Reportes",body,"Reportes" if rol=="admin" else "Control IVA/IIBB")
 
 # ══════════════════════════════════════════════════════════════════════════════
