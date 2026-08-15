@@ -3698,30 +3698,89 @@ def caja():
             cajas_live=('<div class="fcard" style="margin-bottom:16px">'
                        f'<h3>Cajas en tiempo real — hoy</h3>{cajas_live}</div>')
 
+    # ── Tab: Caja en tiempo real ──
+    tab_tiempo_real=(
+        f'<div class="fcard" style="margin-bottom:16px">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;'
+        f'margin-bottom:14px;flex-wrap:wrap;gap:8px">'
+        f'<span style="font-family:\'DM Serif Display\',serif;font-size:1.1rem;color:var(--primary)">Mi caja hoy</span>'
+        f'{estado_badge}</div>'
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{items_hoy}</div>'
+        f'{btn_cierre}'
+        f'</div>'
+        f'{cajas_live if rol=="admin" else ""}'
+        f'{tabla_cobros}'
+    )
+
+    chart_2026_html=""
+    if rol=="admin":
+        chart_2026_html=(
+            f'<div class="fcard" style="margin-bottom:16px">'
+            f'<h3>Importes cobrados por mes — 2026</h3>'
+            f'<div style="position:relative;height:200px"><canvas id="ch-caja-2026"></canvas></div>'
+            f'<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>'
+            f'<script>fetch("/api/cobros_2026").then(r=>r.json()).then(d=>{{new Chart(document.getElementById("ch-caja-2026"),{{type:"bar",data:{{labels:d.labels,datasets:[{{label:"Cobrado",data:d.totales,backgroundColor:"#C8A96E",borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{ticks:{{callback:v=>"$"+(Math.abs(v)>=1000000?Math.round(v/1000000)+"M":Math.abs(v)>=1000?Math.round(v/1000)+"k":v)}}}}}}}}}})}}).catch(()=>{{}});'
+            f'</script></div>'
+        )
+
+    # ── Tab: Movimientos en orden cronologico ──
+    tab_movimientos=(
+        f'{chart_2026_html}'
+        f'{movimiento_dias_html if rol=="admin" else ""}'
+    ) if rol=="admin" else ""
+
+    # ── Tab: Historial de caja cerrada ──
+    tab_historial=(
+        f'<div class="fcard"><h3>Historial de cierres</h3>'
+        f'{cierre_html or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin cierres</p>"}'
+        f'</div>'
+        +(f'<div class="fcard" style="margin-top:16px">'
+          f'<h3>Cobros por mes (cierres globales)</h3>'
+          f'<div style="position:relative;height:180px"><canvas id="ch-caja"></canvas></div>'
+          f'<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>'
+          f'<script>fetch("/api/cierres_por_mes").then(r=>r.json()).then(d=>{{new Chart(document.getElementById("ch-caja"),{{type:"bar",data:{{labels:d.labels,datasets:[{{label:"Cobrado",data:d.totales,backgroundColor:"#185FA5",borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{ticks:{{callback:v=>"$"+(Math.abs(v)>=1000000?Math.round(v/1000000)+"M":Math.abs(v)>=1000?Math.round(v/1000)+"k":v)}}}}}}}}}})}}).catch(()=>{{}});'
+          f'</script></div>' if rol=='admin' else '')
+    )
+
+    # ── Tab: Alertas de dias sin cerrar caja ──
+    n_alertas=alertas_pendientes_html.count("<li>") if alertas_pendientes_html else 0
+    tab_alertas=(
+        alertas_pendientes_html or '<div class="info-box">Sin alertas — todas las cajas de dias anteriores estan cerradas.</div>'
+    ) if rol=="admin" else ""
+
+    if rol=="admin":
+        tabs_nav=(
+            '<div class="tabs" style="margin-bottom:14px">'
+            '<button class="tab on" onclick="showTab(\'tcr\',this)">⏱ Caja en Tiempo Real</button>'
+            '<button class="tab" onclick="showTab(\'tmo\',this)">📅 Movimientos Cronologico</button>'
+            '<button class="tab" onclick="showTab(\'thi\',this)">🗂 Historial de Caja Cerrada</button>'
+            f'<button class="tab" onclick="showTab(\'tal\',this)">⚠ Alertas{f" ({n_alertas})" if n_alertas else ""}</button>'
+            '</div>'
+        )
+        tabs_panels=(
+            f'<div id="tcr" class="tabpanel on">{tab_tiempo_real}</div>'
+            f'<div id="tmo" class="tabpanel">{tab_movimientos}</div>'
+            f'<div id="thi" class="tabpanel">{tab_historial}</div>'
+            f'<div id="tal" class="tabpanel">{tab_alertas}</div>'
+        )
+        tabs_script=(
+            '<script>function showTab(id,btn){'
+            "document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));"
+            "document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));"
+            "document.getElementById(id).classList.add('on');btn.classList.add('on')}</script>"
+        )
+    else:
+        # Secretaria/supervisor: sin tabs administrativos, layout simple (tiempo real + historial propio)
+        tabs_nav=""
+        tabs_panels=f'{tab_tiempo_real}{tab_historial}'
+        tabs_script=""
+
     body=(f'<h1 class="page-title">Caja Diaria</h1>'
           f'<p class="page-sub">Cobros del dia — {usuario} · {fecha_hoy}</p>'
           f'{flash}'
-          f'{alertas_pendientes_html if rol=="admin" else ""}'
-          f'<div class="fcard" style="margin-bottom:16px">'
-          f'<div style="display:flex;justify-content:space-between;align-items:center;'
-          f'margin-bottom:14px;flex-wrap:wrap;gap:8px">'
-          f'<span style="font-family:\'DM Serif Display\',serif;font-size:1.1rem;color:var(--primary)">Mi caja hoy</span>'
-          f'{estado_badge}</div>'
-          f'<div style="display:flex;gap:8px;flex-wrap:wrap">{items_hoy}</div>'
-          f'{btn_cierre}'
-          f'</div>'
-          f'{cajas_live if rol=="admin" else ""}'
-          f'{movimiento_dias_html if rol=="admin" else ""}'
-          f'{tabla_cobros}'
-          f'<div class="fcard"><h3>Historial de cierres</h3>'
-          f'{cierre_html or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin cierres</p>"}'
-          f'</div>'
-          +(f'<div class="fcard" style="margin-top:16px">'
-            f'<h3>Cobros por mes (cierres globales)</h3>'
-            f'<div style="position:relative;height:180px"><canvas id="ch-caja"></canvas></div>'
-            f'<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>'
-            f'<script>fetch("/api/cierres_por_mes").then(r=>r.json()).then(d=>{{new Chart(document.getElementById("ch-caja"),{{type:"bar",data:{{labels:d.labels,datasets:[{{label:"Cobrado",data:d.totales,backgroundColor:"#185FA5",borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{ticks:{{callback:v=>"$"+(Math.abs(v)>=1000000?Math.round(v/1000000)+"M":Math.abs(v)>=1000?Math.round(v/1000)+"k":v)}}}}}}}}}})}}).catch(()=>{{}});'
-            f'</script></div>' if rol=='admin' else '')
+          f'{tabs_nav}'
+          f'{tabs_panels}'
+          f'{tabs_script}'
           +modal_editar_caja)
     return page("Caja",body,"Caja")
 
@@ -5741,6 +5800,21 @@ def api_cierres_por_mes():
     rows=list(reversed(c.fetchall())); conn.close()
     from flask import jsonify
     return jsonify({"labels":[r[0] for r in rows],"totales":[float(r[1] or 0) for r in rows]})
+
+@app.route("/api/cobros_2026")
+@admin_req
+def api_cobros_2026():
+    conn=conectar();c=conn.cursor()
+    c.execute("""SELECT SUBSTRING(fecha,4,2) as mm, COALESCE(SUM(monto),0)
+                 FROM pagos
+                 WHERE fecha LIKE %s AND fecha NOT LIKE %s
+                 GROUP BY mm""",('%/2026','%01/01/2000%'))
+    por_mes={r[0]:float(r[1] or 0) for r in c.fetchall()}
+    conn.close()
+    labels=[MESES_ESP[m] for m in range(1,13)]
+    totales=[por_mes.get(f"{m:02d}",0) for m in range(1,13)]
+    from flask import jsonify
+    return jsonify({"labels":labels,"totales":totales})
 
 from iva_module import register_iva
 register_iva(app)
