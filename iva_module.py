@@ -61,8 +61,8 @@ def register_iva(app):
         pm, pa = (12, anio-1) if mes == 1 else (mes-1, anio)
         nm, na = (1, anio+1) if mes == 12 else (mes+1, anio)
         conn = conectar(); c = conn.cursor()
-        c.execute("""SELECT id,nombre,telefono FROM clientes
-            WHERE (activo IS NOT FALSE) AND (condicion_fiscal='Responsable Inscripto' OR responsable_inscripto=TRUE)
+        c.execute("""SELECT id,nombre,telefono,condicion_fiscal,responsable_inscripto FROM clientes
+            WHERE (activo IS NOT FALSE) AND (condicion_fiscal IN ('Responsable Inscripto','Monotributista') OR responsable_inscripto=TRUE)
             ORDER BY nombre""")
         clientes = c.fetchall()
         c.execute("""SELECT cliente_id,ventas,notas_credito_emitidas,compras,notas_credito_recibidas,
@@ -73,7 +73,9 @@ def register_iva(app):
         datos = {r[0]: r for r in c.fetchall()}
         conn.close()
         filas = ""
-        for cid, nombre, tel_enc in clientes:
+        filas_mono = ""
+        for cid, nombre, tel_enc, condicion, ri in clientes:
+            es_ri = (condicion == "Responsable Inscripto") or ri
             tel_d = (dec(tel_enc) if tel_enc else "") or ""
             tel_limpio = tel_d.replace("-","").replace(" ","").replace("+","")
             d = datos.get(cid)
@@ -91,56 +93,71 @@ def register_iva(app):
             neto_ventas_iibb = (comprobantes or 0) + (liq_hac or 0) + (liq_gra or 0) - (nc_iibb or 0)
             iibb_est = neto_ventas_iibb * ((alicuota or 0)/100)
             iibb_neto = iibb_est - (pagos_cta or 0) - (ret_iibb or 0)
-            wa_btn = ""
-            if saldo_final < 0:
-                bad_iva = f'<span class="badge bd">IVA a pagar {fmt(abs(saldo_final))}</span>'
-                if tel_limpio:
-                    msg = (f"Hola {nombre}! Te escribimos desde Estudio Contable Carlon. "
-                           f"Te informamos que en el periodo {MESES_NOM[mes]} {anio} tenes un IVA a pagar de {fmt(abs(saldo_final))}. "
-                           f"Si tenes facturas de compra de ese periodo que todavia no nos enviaste, por favor acercalas a la oficina "
-                           f"o mandanoslas por foto o mail. Gracias!")
-                    msg_attr = msg.replace(chr(34), "&quot;")
-                    wa_btn = (f'<button type="button" class="btn btn-wa btn-sm waIvaBtn" '
-                              f'data-tel="{tel_limpio}" data-msg="{msg_attr}" '
-                              f'title="Avisar por WhatsApp">📱 Avisar</button>')
-            elif saldo_final > 0:
-                bad_iva = f'<span class="badge bp">Saldo a favor {fmt(saldo_final)}</span>'
-            else:
-                bad_iva = '<span class="badge bpar">Sin saldo</span>'
             if iibb_neto > 0:
                 bad_iibb = f'<span class="badge bd">A pagar {fmt(iibb_neto)}</span>'
             else:
                 bad_iibb = f'<span class="badge bp">{fmt(iibb_neto)}</span>'
-            filas += f'''<tr>
-                <td class="nm">{nombre}</td>
-                <td>{fmt(deb_fiscal)}</td>
-                <td>{fmt(cred_fiscal)}</td>
-                <td>{bad_iva} {wa_btn}</td>
-                <td>{fmt(neto_ventas_iibb)}</td>
-                <td>{bad_iibb}</td>
-                <td><button class="btn btn-o btn-sm ivaBtn"
-                    data-cid="{cid}" data-nombre="{nombre}"
-                    data-ventas="{ventas or 0}" data-ncrede="{ncred_e or 0}"
-                    data-compras="{compras or 0}" data-ncredr="{ncred_r or 0}"
-                    data-debfiscal="{deb_fiscal or 0}" data-credfiscal="{cred_fiscal or 0}"
-                    data-saldoant="{saldo_ant or 0}" data-saldolibre="{saldo_libre or 0}"
-                    data-retperc="{ret_perc or 0}"
-                    data-comprobantes="{comprobantes or 0}" data-liqhac="{liq_hac or 0}" data-liqgra="{liq_gra or 0}"
-                    data-nciibb="{nc_iibb or 0}" data-actividad="{actividad or ''}"
-                    data-alicuota="{alicuota if alicuota is not None else 3}"
-                    data-pagoscta="{pagos_cta or 0}" data-retiibb="{ret_iibb or 0}">Cargar</button></td>
-                </tr>'''
+            btn_cargar = (f'<button class="btn btn-o btn-sm ivaBtn"'
+                    f' data-cid="{cid}" data-nombre="{nombre}" data-mono="{0 if es_ri else 1}"'
+                    f' data-ventas="{ventas or 0}" data-ncrede="{ncred_e or 0}"'
+                    f' data-compras="{compras or 0}" data-ncredr="{ncred_r or 0}"'
+                    f' data-debfiscal="{deb_fiscal or 0}" data-credfiscal="{cred_fiscal or 0}"'
+                    f' data-saldoant="{saldo_ant or 0}" data-saldolibre="{saldo_libre or 0}"'
+                    f' data-retperc="{ret_perc or 0}"'
+                    f' data-comprobantes="{comprobantes or 0}" data-liqhac="{liq_hac or 0}" data-liqgra="{liq_gra or 0}"'
+                    f' data-nciibb="{nc_iibb or 0}" data-actividad="{actividad or ""}"'
+                    f' data-alicuota="{alicuota if alicuota is not None else 3}"'
+                    f' data-pagoscta="{pagos_cta or 0}" data-retiibb="{ret_iibb or 0}">Cargar</button>')
+            if es_ri:
+                wa_btn = ""
+                if saldo_final < 0:
+                    bad_iva = f'<span class="badge bd">IVA a pagar {fmt(abs(saldo_final))}</span>'
+                    if tel_limpio:
+                        msg = (f"Hola {nombre}! Te escribimos desde Estudio Contable Carlon. "
+                               f"Te informamos que en el periodo {MESES_NOM[mes]} {anio} tenes un IVA a pagar de {fmt(abs(saldo_final))}. "
+                               f"Si tenes facturas de compra de ese periodo que todavia no nos enviaste, por favor acercalas a la oficina "
+                               f"o mandanoslas por foto o mail. Gracias!")
+                        msg_attr = msg.replace(chr(34), "&quot;")
+                        wa_btn = (f'<button type="button" class="btn btn-wa btn-sm waIvaBtn" '
+                                  f'data-tel="{tel_limpio}" data-msg="{msg_attr}" '
+                                  f'title="Avisar por WhatsApp">📱 Avisar</button>')
+                elif saldo_final > 0:
+                    bad_iva = f'<span class="badge bp">Saldo a favor {fmt(saldo_final)}</span>'
+                else:
+                    bad_iva = '<span class="badge bpar">Sin saldo</span>'
+                filas += f'''<tr>
+                    <td class="nm">{nombre}</td>
+                    <td>{fmt(deb_fiscal)}</td>
+                    <td>{fmt(cred_fiscal)}</td>
+                    <td>{bad_iva} {wa_btn}</td>
+                    <td>{fmt(neto_ventas_iibb)}</td>
+                    <td>{bad_iibb}</td>
+                    <td>{btn_cargar}</td>
+                    </tr>'''
+            else:
+                filas_mono += f'''<tr>
+                    <td class="nm">{nombre}</td>
+                    <td>{fmt(neto_ventas_iibb)}</td>
+                    <td>{bad_iibb}</td>
+                    <td>{btn_cargar}</td>
+                    </tr>'''
         body = f'''
         <p class="page-title">Control de IVA e Ingresos Brutos</p>
-        <p class="page-sub">Responsables Inscriptos - calculo mensual de IVA e IIBB estimado</p>
+        <p class="page-sub">Responsables Inscriptos (IVA + IIBB) y Monotributistas (solo IIBB) - calculo mensual estimado</p>
         <div class="arow">
             <a class="btn btn-o btn-sm" href="/iva?mes={pm}&anio={pa}">&larr; Anterior</a>
             <span class="period">{MESES_NOM[mes]} {anio}</span>
             <a class="btn btn-o btn-sm" href="/iva?mes={nm}&anio={na}">Siguiente &rarr;</a>
         </div>
+        <h3 style="font-size:1rem;margin:16px 0 8px">Responsables Inscriptos</h3>
         <div class="dtable"><table>
             <thead><tr><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
-            <tbody>{filas}</tbody>
+            <tbody>{filas or "<tr><td colspan=7 style='color:var(--muted);text-align:center;padding:16px'>Sin responsables inscriptos</td></tr>"}</tbody>
+        </table></div>
+        <h3 style="font-size:1rem;margin:22px 0 8px">Monotributistas (solo Ingresos Brutos)</h3>
+        <div class="dtable"><table>
+            <thead><tr><th>Cliente</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
+            <tbody>{filas_mono or "<tr><td colspan=4 style='color:var(--muted);text-align:center;padding:16px'>Sin monotributistas</td></tr>"}</tbody>
         </table></div>
         <div class="mo" id="miva"><div class="modal">
             <h3>Control de IVA / IIBB</h3>
@@ -149,6 +166,8 @@ def register_iva(app):
                 <input type="hidden" name="cliente_id" id="miva_cid">
                 <input type="hidden" name="mes" value="{mes}">
                 <input type="hidden" name="anio" value="{anio}">
+                <input type="hidden" name="es_monotributista" id="f_esmono" value="0">
+                <div id="fieldsetIva">
                 <h3 style="font-size:.95rem">IVA</h3>
                 <div class="fgrid">
                     <div class="fg"><label>Ventas (bruto)</label><input type="number" step="0.01" name="ventas" id="f_ventas"></div>
@@ -164,6 +183,7 @@ def register_iva(app):
                 <div class="info-box" style="margin-bottom:12px">
                     El saldo final de IVA sale de: Credito Fiscal + Saldo Tecnico Anterior + SLD + Retenciones/Percepciones &minus; Debito Fiscal.
                     Si da positivo es <b>saldo a favor</b> del contribuyente; si da negativo es <b>IVA a pagar</b>.
+                </div>
                 </div>
                 <h3 style="font-size:.95rem">Ingresos Brutos (estimado)</h3>
                 <div class="fgrid">
@@ -215,6 +235,9 @@ def register_iva(app):
             document.getElementById('f_alicuota').value=b.dataset.alicuota;
             document.getElementById('f_pagoscta').value=b.dataset.pagoscta;
             document.getElementById('f_retiibb').value=b.dataset.retiibb;
+            var esMono=b.dataset.mono==='1';
+            document.getElementById('f_esmono').value=esMono?'1':'0';
+            document.getElementById('fieldsetIva').style.display=esMono?'none':'';
             document.getElementById('miva').classList.add('on');
         }});
         </script>
