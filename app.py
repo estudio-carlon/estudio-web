@@ -3936,11 +3936,23 @@ def reportes():
 
     # Bloques de cumplimiento adicionales (Ganancias, Bienes Personales, Part. Societarias, PUB),
     # embebidos como solapas dentro de Reportes (ya no son items sueltos del menu superior).
+    # Defensivo: si declaraciones_module.py todavia no tiene las funciones frag_* (por ejemplo,
+    # se subio un app.py sin actualizar ese archivo junto), no rompe /reportes: muestra un aviso
+    # en vez de las solapas, en lugar de tirar un error 500 en toda la pagina.
+    def _frag_seguro(nombre_attr, titulo):
+        fn = getattr(app, nombre_attr, None)
+        if fn is None:
+            return f'<div class="info-box">Modulo "{titulo}" no disponible: falta actualizar declaraciones_module.py junto con este app.py.</div>'
+        try:
+            return fn()
+        except Exception as _e:
+            return f'<div class="info-box">No se pudo cargar "{titulo}" ({_e}).</div>'
+
     tabs_extra_html=f'''
-    <div id="t8" class="tabpanel">{app.frag_ganancias()}</div>
-    <div id="t9" class="tabpanel">{app.frag_bienes_personales()}</div>
-    <div id="t10" class="tabpanel">{app.frag_part_societarias()}</div>
-    <div id="t11" class="tabpanel">{app.frag_pub()}</div>
+    <div id="t8" class="tabpanel">{_frag_seguro("frag_ganancias","Control Ganancias")}</div>
+    <div id="t9" class="tabpanel">{_frag_seguro("frag_bienes_personales","Control Bienes Personales")}</div>
+    <div id="t10" class="tabpanel">{_frag_seguro("frag_part_societarias","Part. Societarias")}</div>
+    <div id="t11" class="tabpanel">{_frag_seguro("frag_pub","PUB")}</div>
     '''
     tabs_extra_btns='''
       <button class="tab" onclick="showTab('t8',this)">Control Ganancias</button>
