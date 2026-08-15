@@ -405,9 +405,9 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/ganancias","Ganancias"),("/bienes-personales","Bienes Personales"),("/participaciones-societarias","Part. Societarias"),("/pub","PUB"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/novedades","Novedades")]
+    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/ganancias","Ganancias"),("/bienes-personales","Bienes Personales"),("/participaciones-societarias","Part. Societarias"),("/pub","PUB"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -572,6 +572,9 @@ def actualizar_db():
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsable_inscripto BOOLEAN DEFAULT FALSE",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS categoria_iibb TEXT DEFAULT 'B'",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS es_sociedad BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS inscripto_ganancias BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS inscripto_bienes_personales BOOLEAN DEFAULT FALSE",
         "UPDATE clientes SET activo=TRUE WHERE activo IS NULL",
         "UPDATE clientes SET categoria_iibb='B' WHERE categoria_iibb IS NULL",
     ]:
@@ -1853,9 +1856,12 @@ def clientes():
         if cat_iibb not in CATEGORIAS_IIBB: cat_iibb="B"
         ri = condicion == "Responsable Inscripto"
         wa_fact = request.form.get("envio_wa_facturas","0")=="1"
-        c.execute("""INSERT INTO clientes(nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,categoria_iibb)
-                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,cat_iibb))
+        es_sociedad = request.form.get("es_sociedad","0")=="1"
+        insc_gan = request.form.get("inscripto_ganancias","0")=="1"
+        insc_bp = request.form.get("inscripto_bienes_personales","0")=="1"
+        c.execute("""INSERT INTO clientes(nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,categoria_iibb,es_sociedad,inscripto_ganancias,inscripto_bienes_personales)
+                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,cat_iibb,es_sociedad,insc_gan,insc_bp))
         conn.commit()
         periodo=datetime.now().strftime("%m/%Y")
         c.execute("SELECT id FROM clientes WHERE nombre=%s ORDER BY id DESC LIMIT 1",(nombre,))
@@ -1867,16 +1873,16 @@ def clientes():
 
     tab_cl=request.args.get("tab","activos")
     if tab_cl=="baja":
-        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas,categoria_iibb FROM clientes WHERE activo=FALSE ORDER BY nombre")
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas,categoria_iibb,es_sociedad,inscripto_ganancias,inscripto_bienes_personales FROM clientes WHERE activo=FALSE ORDER BY nombre")
     else:
-        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas,categoria_iibb FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
+        c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,notas,categoria_iibb,es_sociedad,inscripto_ganancias,inscripto_bienes_personales FROM clientes WHERE activo IS NOT FALSE ORDER BY nombre")
     data_raw=c.fetchall()
     # count baja
     c.execute("SELECT COUNT(*) FROM clientes WHERE activo=FALSE");n_baja=c.fetchone()[0]
     conn.close();es_admin=session.get("rol")=="admin"
     rows=""
     for d in data_raw:
-        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f,notas_raw,cat_iibb=d
+        cid,nombre,cuit_enc,tel_enc,email_enc,abono,condicion,actividad,ri,wa_f,notas_raw,cat_iibb,es_soc,insc_gan,insc_bp=d
         notas_attr=(notas_raw or "").replace("&","&amp;").replace(chr(34),"&quot;").replace("<","&lt;").replace(chr(10),"&#10;")
         nombre_attr=(nombre or "").replace("&","&amp;").replace(chr(34),"&quot;")
         cuit_d=dec(cuit_enc);tel_d=dec(tel_enc);email_d=dec(email_enc)
@@ -1884,6 +1890,10 @@ def clientes():
         cond_color={"Responsable Inscripto":"#185FA5","Monotributista":"#1D9E75","Exento":"#7B68EE"}.get(condicion or "","#888")
         cond_badge=f'<span style="font-size:.65rem;padding:2px 6px;border-radius:8px;background:#f0f4ff;color:{cond_color};font-weight:700">{condicion or "---"}</span>'
         cat_iibb_badge=f'<span style="font-size:.62rem;padding:1px 6px;border-radius:8px;background:#f5eefc;color:#6a1b9a;font-weight:700;margin-left:4px" title="Categoria Ingresos Brutos">IIBB {cat_iibb or "B"}</span>'
+        flags_badge=""
+        if es_soc: flags_badge+='<span style="font-size:.6rem;padding:1px 5px;border-radius:7px;background:#eef2ff;color:#3949ab;font-weight:700;margin-left:3px" title="Sociedad">SOC</span>'
+        if insc_gan: flags_badge+='<span style="font-size:.6rem;padding:1px 5px;border-radius:7px;background:#fff4e5;color:#b06a00;font-weight:700;margin-left:3px" title="Inscripto en Ganancias">GAN</span>'
+        if insc_bp: flags_badge+='<span style="font-size:.6rem;padding:1px 5px;border-radius:7px;background:#e8f7ef;color:#1D9E75;font-weight:700;margin-left:3px" title="Inscripto en Bienes Personales">BP</span>'
         ri_icon="🟢 " if ri else ""
         wa_icon='<span title="Recibe WA facturas" style="font-size:.8rem"> 📱</span>' if wa_f else ""
         btn_arca=('<a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-xs btn-arca" title="Ingresar ARCA">ARCA</a>'
@@ -1900,7 +1910,7 @@ def clientes():
             btn_del='<a href="/baja_cliente/'+str(cid)+'" class="btn btn-xs btn-o" title="Dar de baja">Dar de baja</a>'
         rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
           <td class="nm">{nombre}{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
-          <td class="mu">{cuit_d or "---"}<br>{cond_badge}{cat_iibb_badge}</td>
+          <td class="mu">{cuit_d or "---"}<br>{cond_badge}{cat_iibb_badge}{flags_badge}</td>
           <td class="mu">{tel_d or "---"}</td>
           <td class="mu">{email_d or "---"}</td>
           <td>{fmt(abono or 0)}</td>
@@ -1967,7 +1977,19 @@ def clientes():
         <label style="font-size:.84rem;cursor:pointer" for="wa-chk">📱 Enviar recordatorio WhatsApp de facturas de compras a fin de mes</label>
       </div>
       <div id="wa-hint" style="display:none" class="info-box" style="margin-bottom:10px">✅ Este cliente recibirá WhatsApp automático a fin de mes.</div>
-      <div class="info-box" style="margin-bottom:12px">🔒 CUIT, teléfono y email se guardan encriptados.</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="checkbox" name="es_sociedad" value="1" id="soc-chk" style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="soc-chk">🏢 Es Sociedad (habilita Participaciones Societarias y PUB)</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="checkbox" name="inscripto_ganancias" value="1" id="gan-chk" style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="gan-chk">📋 Inscripto en Ganancias</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <input type="checkbox" name="inscripto_bienes_personales" value="1" id="bp-chk" style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="bp-chk">📋 Inscripto en Bienes Personales</label>
+      </div>
+      <div class="info-box" style="margin-bottom:12px">🔒 CUIT, teléfono y email se guardan encriptados. Estos tres campos se cargan a mano por ahora (traerlos automático desde la Constancia de ARCA queda para una fase futura de integración).</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-p">Guardar Cliente</button>
         <button type="button" class="btn btn-arca btn-sm" onclick="buscarArca()">Ver constancia ARCA</button>
@@ -2062,20 +2084,24 @@ def editar_cliente(id):
         wa_fact = request.form.get("envio_wa_facturas","0")=="1"
         cat_iibb=request.form.get("categoria_iibb","B")
         if cat_iibb not in CATEGORIAS_IIBB: cat_iibb="B"
+        es_sociedad = request.form.get("es_sociedad","0")=="1"
+        insc_gan = request.form.get("inscripto_ganancias","0")=="1"
+        insc_bp = request.form.get("inscripto_bienes_personales","0")=="1"
         c.execute("""UPDATE clientes SET nombre=%s,cuit=%s,telefono=%s,email=%s,abono=%s,
                      condicion_fiscal=%s,actividad=%s,responsable_inscripto=%s,envio_wa_facturas=%s,
-                     categoria_iibb=%s
+                     categoria_iibb=%s,es_sociedad=%s,inscripto_ganancias=%s,inscripto_bienes_personales=%s
                      WHERE id=%s""",
-                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,cat_iibb,id))
+                  (nombre,enc(cuit),enc(tel),enc(email),abono,condicion,actividad,ri,wa_fact,cat_iibb,es_sociedad,insc_gan,insc_bp,id))
         conn.commit()
         registrar_auditoria("EDICION CLIENTE",f"Actualizado {nombre} | {condicion}",id,nombre)
         conn.close();return redirect("/clientes")
-    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,categoria_iibb FROM clientes WHERE id=%s",(id,))
+    c.execute("SELECT id,nombre,cuit,telefono,email,abono,condicion_fiscal,actividad,responsable_inscripto,envio_wa_facturas,categoria_iibb,es_sociedad,inscripto_ganancias,inscripto_bienes_personales FROM clientes WHERE id=%s",(id,))
     d=c.fetchone();conn.close()
     if not d: return redirect("/clientes")
     cuit_d=dec(d[2]);tel_d=dec(d[3]);email_d=dec(d[4])
     condicion=d[6] or "Responsable Inscripto";actividad=d[7] or "";ri=d[8];wa_f=d[9]
     cat_iibb_actual=d[10] or "B"
+    es_soc_actual=d[11];insc_gan_actual=d[12];insc_bp_actual=d[13]
     cuit_limpio=(cuit_d or "").replace("-","").replace(" ","")
     cond_opts="".join(f'<option value="{cf}" {"selected" if cf==condicion else ""}>{cf}</option>' for cf in CONDICIONES_FISCALES)
     cat_iibb_opts="".join(f'<option value="{ci}" {"selected" if ci==cat_iibb_actual else ""}>{ci}</option>' for ci in CATEGORIAS_IIBB)
@@ -2102,6 +2128,18 @@ def editar_cliente(id):
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
         <input type="checkbox" name="envio_wa_facturas" value="1" id="wa-chk" {wa_checked} style="width:auto">
         <label style="font-size:.84rem;cursor:pointer" for="wa-chk">Enviar recordatorio WA de facturas a fin de mes</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="checkbox" name="es_sociedad" value="1" id="soc-chk" {"checked" if es_soc_actual else ""} style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="soc-chk">🏢 Es Sociedad (habilita Participaciones Societarias y PUB)</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="checkbox" name="inscripto_ganancias" value="1" id="gan-chk" {"checked" if insc_gan_actual else ""} style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="gan-chk">📋 Inscripto en Ganancias</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+        <input type="checkbox" name="inscripto_bienes_personales" value="1" id="bp-chk" {"checked" if insc_bp_actual else ""} style="width:auto">
+        <label style="font-size:.84rem;cursor:pointer" for="bp-chk">📋 Inscripto en Bienes Personales</label>
       </div>
       <div style="display:flex;gap:8px"><button class="btn btn-p">Guardar Cambios</button><a href="/clientes" class="btn btn-o">Cancelar</a></div>
     </form></div>"""
@@ -5706,6 +5744,9 @@ def api_cierres_por_mes():
 
 from iva_module import register_iva
 register_iva(app)
+
+from declaraciones_module import register_declaraciones
+register_declaraciones(app)
 
 if __name__=="__main__":
         app.run(debug=True)
