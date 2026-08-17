@@ -142,6 +142,7 @@ def register_iva(app):
                     <td>{btn_cargar}</td>
                     </tr>'''
         body = f'''
+        <a href="/reportes?tab=t6" class="btn btn-o btn-sm" style="margin-bottom:16px">&larr; Volver a Reportes</a>
         <p class="page-title">Control de IVA e Ingresos Brutos</p>
         <p class="page-sub">Responsables Inscriptos (IVA + IIBB) y Monotributistas (solo IIBB) - calculo mensual estimado</p>
         <div class="arow">
