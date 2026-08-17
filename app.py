@@ -3513,7 +3513,7 @@ def caja():
     if rol=="admin":
         c.execute("""SELECT DISTINCT SUBSTRING(fecha,1,10) fd, emitido_por FROM pagos
                      WHERE emitido_por IS NOT NULL AND fecha NOT LIKE %s
-                     ORDER BY TO_DATE(SUBSTRING(fecha,1,10),'DD/MM/YYYY') DESC LIMIT 120""",('%01/01/2000%',))
+                     ORDER BY fd DESC LIMIT 120""",('%01/01/2000%',))
         dias_usuarios=c.fetchall()
         c.execute("SELECT fecha,usuario FROM cierres_caja WHERE cerrado=TRUE")
         cerrados_set={(r[0],r[1]) for r in c.fetchall()}
@@ -3817,7 +3817,7 @@ def reportes():
     mes_act,anio_act=now_ar_dt().month,now_ar_dt().year
     c.execute("""SELECT cliente_id,debito_fiscal,credito_fiscal,saldo_anterior,saldo_libre_disponibilidad,
                  retenciones_percepciones,neto_ventas_comprobantes,liquidaciones_hacienda,liquidaciones_grano,
-                 notas_credito_iibb,alicuota_iibb
+                 notas_credito_iibb,alicuota_iibb,pagos_cuenta_iibb,retenciones_iibb
                  FROM iva_control WHERE mes=%s AND anio=%s""",(mes_act,anio_act))
     iva_periodo={r[0]: r for r in c.fetchall()}
     conn.close()
@@ -3826,11 +3826,21 @@ def reportes():
         """Devuelve (saldo_final_iva, neto_facturado_iibb, impuesto_estimado_iibb) del periodo actual, o None si no hay carga."""
         d=iva_periodo.get(cid)
         if not d: return None,None,None
-        (_,deb,cred,saldo_ant,saldo_libre,ret_perc,comprobantes,liq_hac,liq_gra,nc_iibb,alicuota)=d
+        (_,deb,cred,saldo_ant,saldo_libre,ret_perc,comprobantes,liq_hac,liq_gra,nc_iibb,alicuota,pagos_cta,ret_iibb)=d
         saldo_final=(cred or 0)+(saldo_ant or 0)+(saldo_libre or 0)+(ret_perc or 0)-(deb or 0)
         neto_fact=(comprobantes or 0)+(liq_hac or 0)+(liq_gra or 0)-(nc_iibb or 0)
         impuesto_est=neto_fact*((alicuota or 0)/100)
         return saldo_final,neto_fact,impuesto_est
+
+    def _raw_iibb(cid):
+        """Valores crudos cargados de IIBB para precargar el formulario de Monotributistas."""
+        d=iva_periodo.get(cid)
+        if not d:
+            return dict(comprobantes=0,liq_hac=0,liq_gra=0,nc_iibb=0,alicuota=3,pagos_cta=0,ret_iibb=0)
+        (_,deb,cred,saldo_ant,saldo_libre,ret_perc,comprobantes,liq_hac,liq_gra,nc_iibb,alicuota,pagos_cta,ret_iibb)=d
+        return dict(comprobantes=comprobantes or 0,liq_hac=liq_hac or 0,liq_gra=liq_gra or 0,
+                    nc_iibb=nc_iibb or 0,alicuota=alicuota if alicuota is not None else 3,
+                    pagos_cta=pagos_cta or 0,ret_iibb=ret_iibb or 0)
 
     def _badge_posicion_iva(saldo_final):
         if saldo_final is None:
@@ -3859,10 +3869,12 @@ def reportes():
         lista=sorted(ri_grupos[g])
         if not lista: continue
         total_ri+=len(lista)
-        filas_iva+=f'<tr class="grupo-row"><td colspan="3" style="background:#f0f4ff;font-weight:700;color:var(--info);font-size:.78rem;padding:8px 10px">{GRUPO_LBL[g]} &middot; {len(lista)} cliente(s)</td></tr>'
+        filas_iva+=f'<tr class="grupo-row"><td colspan="5" style="background:#f0f4ff;font-weight:700;color:var(--info);font-size:.78rem;padding:8px 10px">{GRUPO_LBL[g]} &middot; {len(lista)} cliente(s)</td></tr>'
         for nombre,cuit_d,cid in lista:
-            saldo_final,_,_=_calc_periodo(cid)
-            filas_iva+=f'<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td><td>{_badge_posicion_iva(saldo_final)}</td></tr>'
+            saldo_final,neto_fact,impuesto_est=_calc_periodo(cid)
+            neto_txt=fmt(neto_fact) if neto_fact is not None else "---"
+            imp_txt=fmt(impuesto_est) if impuesto_est is not None else "---"
+            filas_iva+=f'<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td><td>{_badge_posicion_iva(saldo_final)}</td><td class="mu">{neto_txt}</td><td style="font-weight:600">{imp_txt}</td></tr>'
 
     # ── Control Ingresos Brutos: Resp. Inscriptos por un lado, Monotributistas por otro ──
     lista_ri_iibb=[];lista_mono_iibb=[]
@@ -3887,7 +3899,25 @@ def reportes():
                 <td style="font-weight:600">{imp_txt}</td></tr>'''
         return f
     filas_iibb_ri=_filas_iibb(lista_ri_iibb,"R.I.","#e8f0fb","#185FA5")
-    filas_iibb_mono=_filas_iibb(lista_mono_iibb,"Mono.","#e8f7ef","#1D9E75")
+
+    def _filas_mono_editable(lista):
+        f=""
+        for nombre,cuit_d,cid,cat_iibb in lista:
+            _,neto_fact,impuesto_est=_calc_periodo(cid)
+            neto_txt=fmt(neto_fact) if neto_fact is not None else "---"
+            imp_txt=fmt(impuesto_est) if impuesto_est is not None else "---"
+            r=_raw_iibb(cid)
+            f+=f'''<tr><td class="nm">{nombre}</td><td class="mu">{cuit_d or "---"}</td>
+                <td>{_cat_select(cid,cat_iibb)}</td>
+                <td class="mu">{neto_txt}</td>
+                <td style="font-weight:600">{imp_txt}</td>
+                <td><button type="button" class="btn btn-o btn-sm monoIibbBtn"
+                    data-cid="{cid}" data-nombre="{nombre}"
+                    data-comprobantes="{r['comprobantes']}" data-liqhac="{r['liq_hac']}" data-liqgra="{r['liq_gra']}"
+                    data-nciibb="{r['nc_iibb']}" data-alicuota="{r['alicuota']}"
+                    data-pagoscta="{r['pagos_cta']}" data-retiibb="{r['ret_iibb']}">Cargar</button></td></tr>'''
+        return f
+    filas_iibb_mono=_filas_mono_editable(lista_mono_iibb)
 
     filas_mes="".join(f'<tr><td class="nm">{r[0]}</td><td>{fmt(r[1])}</td><td style="color:var(--success);font-weight:600">{fmt(r[2])}</td><td style="color:{"var(--danger)" if (r[3] or 0)>0 else "var(--success)"};font-weight:600">{fmt(r[3] or 0)}</td></tr>' for r in por_mes)
     filas_rank="".join(f'<tr><td class="nm">{r[0]}</td><td>{fmt(r[1])}</td><td style="color:var(--success)">{fmt(r[2])}</td><td style="color:{"var(--danger)" if (r[3] or 0)>0 else "var(--success)"}"><b>{fmt(r[3] or 0)}</b></td></tr>' for r in ranking)
@@ -3901,26 +3931,68 @@ def reportes():
     tabs_civa_html=f'''
     <div id="t6" class="tabpanel{" on" if rol!="admin" else ""}">
       <div class="fcard" style="margin-bottom:14px">
-        <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">Responsables Inscriptos ({total_ri}) agrupados por orden de vencimiento de IVA (F.731) segun terminación de CUIT, siguiendo el cronograma general de AFIP (5 grupos escalonados en la misma semana del mes siguiente). La posición de IVA es la del periodo actual ({MESES_ESP[mes_act]} {anio_act}).</p>
+        <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">IVA + Ingresos Brutos de Responsables Inscriptos ({total_ri}), agrupados por orden de vencimiento de IVA (F.731) segun terminación de CUIT, siguiendo el cronograma general de AFIP (5 grupos escalonados en la misma semana del mes siguiente). Se cargan juntos porque es el mismo momento de carga. Los valores son del periodo actual ({MESES_ESP[mes_act]} {anio_act}).</p>
         <a href="/iva" class="btn btn-o btn-sm">Ir a Carga de IVA / IIBB mensual</a>
       </div>
-      <div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Posición IVA</th></tr></thead><tbody>{filas_iva or "<tr><td colspan=3 style='color:var(--muted);text-align:center;padding:20px'>Sin responsables inscriptos cargados</td></tr>"}</tbody></table></div>
+      <div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Posición IVA</th><th>Neto Facturado</th><th>Impuesto Estimado</th></tr></thead><tbody>{filas_iva or "<tr><td colspan=5 style='color:var(--muted);text-align:center;padding:20px'>Sin responsables inscriptos cargados</td></tr>"}</tbody></table></div>
     </div>
     <div id="t7" class="tabpanel">
       <div class="fcard" style="margin-bottom:14px">
         <p style="font-size:.84rem;color:var(--muted);margin-bottom:6px">Ingresos Brutos (Rentas Sgo. del Estero) — <b>Categoría A</b> vence el 18 de cada mes, <b>Categoría B</b> vence el 15. La categoría se puede cambiar aca mismo. Neto Facturado e Impuesto Estimado son del periodo actual ({MESES_ESP[mes_act]} {anio_act}).</p>
-        <a href="/iva" class="btn btn-o btn-sm">Ir a cargar IIBB mensual</a>
+        <p style="font-size:.78rem;color:var(--muted)">Responsables Inscriptos: estos datos ya se cargaron desde la solapa Control IVA (misma carga, solo lectura aca). Monotributistas: se cargan directo desde esta solapa con el botón "Cargar" de cada fila.</p>
       </div>
       <div class="tabs" style="margin-bottom:10px">
         <button class="tab subtab on" onclick="showSub('sri',this)">Responsables Inscriptos ({len(lista_ri_iibb)})</button>
         <button class="tab subtab" onclick="showSub('smo',this)">Monotributistas ({len(lista_mono_iibb)})</button>
       </div>
       <div id="sri" class="subpanel on"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th><th>Categoría</th><th>Neto Facturado</th><th>Impuesto Estimado</th></tr></thead><tbody>{filas_iibb_ri or "<tr><td colspan=6 style='color:var(--muted);text-align:center;padding:20px'>Sin Responsables Inscriptos</td></tr>"}</tbody></table></div></div>
-      <div id="smo" class="subpanel" style="display:none"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Condición</th><th>Categoría</th><th>Neto Facturado</th><th>Impuesto Estimado</th></tr></thead><tbody>{filas_iibb_mono or "<tr><td colspan=6 style='color:var(--muted);text-align:center;padding:20px'>Sin Monotributistas</td></tr>"}</tbody></table></div></div>
+      <div id="smo" class="subpanel" style="display:none"><div class="dtable"><table><thead><tr><th>Cliente</th><th>CUIT</th><th>Categoría</th><th>Neto Facturado</th><th>Impuesto Estimado</th><th></th></tr></thead><tbody>{filas_iibb_mono or "<tr><td colspan=6 style='color:var(--muted);text-align:center;padding:20px'>Sin Monotributistas</td></tr>"}</tbody></table></div></div>
     </div>
+    <div class="mo" id="mmono"><div class="modal">
+        <h3>Cargar Ingresos Brutos — Monotributista</h3>
+        <p class="msub" id="mmono_nombre_lbl"></p>
+        <form method="post" action="/iva/guardar">
+            <input type="hidden" name="cliente_id" id="mmono_cid">
+            <input type="hidden" name="mes" value="{mes_act}">
+            <input type="hidden" name="anio" value="{anio_act}">
+            <input type="hidden" name="redir" value="/reportes?tab=t7">
+            <div class="fgrid">
+                <div class="fg"><label>Ventas Comprobantes en Línea</label><input type="number" step="0.01" name="neto_ventas_comprobantes" id="mmono_comprobantes"></div>
+                <div class="fg"><label>Liquidaciones de Hacienda</label><input type="number" step="0.01" name="liquidaciones_hacienda" id="mmono_liqhac"></div>
+                <div class="fg"><label>Liquidaciones de Grano</label><input type="number" step="0.01" name="liquidaciones_grano" id="mmono_liqgra"></div>
+                <div class="fg"><label>Notas de Crédito (a restar)</label><input type="number" step="0.01" name="notas_credito_iibb" id="mmono_nciibb"></div>
+                <div class="fg"><label>Alícuota IIBB (%)</label><input type="number" step="0.01" name="alicuota_iibb" id="mmono_alicuota" value="3"></div>
+                <div class="fg"><label>Pagos a Cuenta (guías pagadas Rentas)</label><input type="number" step="0.01" name="pagos_cuenta_iibb" id="mmono_pagoscta"></div>
+                <div class="fg"><label>Retenciones y Percepciones IIBB del periodo</label><input type="number" step="0.01" name="retenciones_iibb" id="mmono_retiibb"></div>
+            </div>
+            <div class="info-box" style="margin-bottom:12px">
+                Neto de Ventas = Comprobantes en linea + Liquidaciones de Hacienda + Liquidaciones de Grano &minus; Notas de Credito.<br>
+                IIBB estimado = Neto de Ventas &times; Aliquota. IIBB a pagar = IIBB estimado &minus; Pagos a Cuenta &minus; Retenciones/Percepciones.
+            </div>
+            <div class="mact">
+                <button type="button" class="btn btn-o" onclick="document.getElementById('mmono').classList.remove('on')">Cancelar</button>
+                <button type="submit" class="btn btn-p">Guardar</button>
+            </div>
+        </form>
+    </div></div>
     <script>
     function showTab(id,btn){{document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab:not(.subtab)').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');btn.classList.add('on')}}
     function showSub(id,btn){{document.querySelectorAll('.subpanel').forEach(p=>{{p.classList.remove('on');p.style.display='none'}});document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('on'));document.getElementById(id).classList.add('on');document.getElementById(id).style.display='';btn.classList.add('on')}}
+    document.addEventListener('click',function(e){{
+        var mb=e.target.closest('.monoIibbBtn');
+        if(!mb) return;
+        document.getElementById('mmono_cid').value=mb.dataset.cid;
+        document.getElementById('mmono_nombre_lbl').textContent=mb.dataset.nombre;
+        document.getElementById('mmono_comprobantes').value=mb.dataset.comprobantes;
+        document.getElementById('mmono_liqhac').value=mb.dataset.liqhac;
+        document.getElementById('mmono_liqgra').value=mb.dataset.liqgra;
+        document.getElementById('mmono_nciibb').value=mb.dataset.nciibb;
+        document.getElementById('mmono_alicuota').value=mb.dataset.alicuota;
+        document.getElementById('mmono_pagoscta').value=mb.dataset.pagoscta;
+        document.getElementById('mmono_retiibb').value=mb.dataset.retiibb;
+        document.getElementById('mmono').classList.add('on');
+    }});
+    document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('on')}}));
     document.addEventListener('change',function(e){{
         var sel=e.target.closest('.catIibbSel');
         if(!sel) return;
@@ -5853,7 +5925,7 @@ def api_cobros_2026():
     c.execute("""SELECT SUBSTRING(fecha,4,2) as mm, COALESCE(SUM(monto),0)
                  FROM pagos
                  WHERE fecha LIKE %s AND fecha NOT LIKE %s
-                 GROUP BY mm""",('%/2026%','%01/01/2000%'))
+                 GROUP BY mm""",('%/2026','%01/01/2000%'))
     por_mes={r[0]:float(r[1] or 0) for r in c.fetchall()}
     conn.close()
     labels=[MESES_ESP[m] for m in range(1,13)]
