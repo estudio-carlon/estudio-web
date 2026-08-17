@@ -290,4 +290,5 @@ def register_iva(app):
              now_ar(), session.get("display", session.get("user","?"))))
         conn.commit(); conn.close()
         registrar_auditoria("IVA_CONTROL", f"Actualizo control IVA/IIBB periodo {mes}/{anio}", cliente_id)
-        return redirect(f"/iva?mes={mes}&anio={anio}")
+        redir = f.get("redir", "").strip()
+        return redirect(redir if redir else f"/iva?mes={mes}&anio={anio}")
