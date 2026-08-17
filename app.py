@@ -3513,7 +3513,7 @@ def caja():
     if rol=="admin":
         c.execute("""SELECT DISTINCT SUBSTRING(fecha,1,10) fd, emitido_por FROM pagos
                      WHERE emitido_por IS NOT NULL AND fecha NOT LIKE %s
-                     ORDER BY fd DESC LIMIT 120""",('%01/01/2000%',))
+                     ORDER BY TO_DATE(SUBSTRING(fecha,1,10),'DD/MM/YYYY') DESC LIMIT 120""",('%01/01/2000%',))
         dias_usuarios=c.fetchall()
         c.execute("SELECT fecha,usuario FROM cierres_caja WHERE cerrado=TRUE")
         cerrados_set={(r[0],r[1]) for r in c.fetchall()}
@@ -5853,7 +5853,7 @@ def api_cobros_2026():
     c.execute("""SELECT SUBSTRING(fecha,4,2) as mm, COALESCE(SUM(monto),0)
                  FROM pagos
                  WHERE fecha LIKE %s AND fecha NOT LIKE %s
-                 GROUP BY mm""",('%/2026','%01/01/2000%'))
+                 GROUP BY mm""",('%/2026%','%01/01/2000%'))
     por_mes={r[0]:float(r[1] or 0) for r in c.fetchall()}
     conn.close()
     labels=[MESES_ESP[m] for m in range(1,13)]
