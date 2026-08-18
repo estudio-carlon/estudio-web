@@ -62,7 +62,7 @@ def register_iva(app):
         nm, na = (1, anio+1) if mes == 12 else (mes+1, anio)
         conn = conectar(); c = conn.cursor()
         c.execute("""SELECT id,nombre,telefono,condicion_fiscal,responsable_inscripto FROM clientes
-            WHERE (activo IS NOT FALSE) AND (condicion_fiscal IN ('Responsable Inscripto','Monotributista') OR responsable_inscripto=TRUE)
+            WHERE (activo IS NOT FALSE) AND (condicion_fiscal='Responsable Inscripto' OR responsable_inscripto=TRUE)
             ORDER BY nombre""")
         clientes = c.fetchall()
         c.execute("""SELECT cliente_id,ventas,notas_credito_emitidas,compras,notas_credito_recibidas,
@@ -73,7 +73,6 @@ def register_iva(app):
         datos = {r[0]: r for r in c.fetchall()}
         conn.close()
         filas = ""
-        filas_mono = ""
         for cid, nombre, tel_enc, condicion, ri in clientes:
             es_ri = (condicion == "Responsable Inscripto") or ri
             tel_d = (dec(tel_enc) if tel_enc else "") or ""
@@ -134,17 +133,10 @@ def register_iva(app):
                     <td>{bad_iibb}</td>
                     <td>{btn_cargar}</td>
                     </tr>'''
-            else:
-                filas_mono += f'''<tr>
-                    <td class="nm">{nombre}</td>
-                    <td>{fmt(neto_ventas_iibb)}</td>
-                    <td>{bad_iibb}</td>
-                    <td>{btn_cargar}</td>
-                    </tr>'''
         body = f'''
         <a href="/reportes?tab=t6" class="btn btn-o btn-sm" style="margin-bottom:16px">&larr; Volver a Reportes</a>
         <p class="page-title">Control de IVA e Ingresos Brutos</p>
-        <p class="page-sub">Responsables Inscriptos (IVA + IIBB) y Monotributistas (solo IIBB) - calculo mensual estimado</p>
+        <p class="page-sub">Responsables Inscriptos (IVA + IIBB) - calculo mensual estimado</p>
         <div class="arow">
             <a class="btn btn-o btn-sm" href="/iva?mes={pm}&anio={pa}">&larr; Anterior</a>
             <span class="period">{MESES_NOM[mes]} {anio}</span>
@@ -154,11 +146,6 @@ def register_iva(app):
         <div class="dtable"><table>
             <thead><tr><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
             <tbody>{filas or "<tr><td colspan=7 style='color:var(--muted);text-align:center;padding:16px'>Sin responsables inscriptos</td></tr>"}</tbody>
-        </table></div>
-        <h3 style="font-size:1rem;margin:22px 0 8px">Monotributistas (solo Ingresos Brutos)</h3>
-        <div class="dtable"><table>
-            <thead><tr><th>Cliente</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
-            <tbody>{filas_mono or "<tr><td colspan=4 style='color:var(--muted);text-align:center;padding:16px'>Sin monotributistas</td></tr>"}</tbody>
         </table></div>
         <div class="mo" id="miva"><div class="modal">
             <h3>Control de IVA / IIBB</h3>
