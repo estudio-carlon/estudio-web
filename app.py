@@ -3511,15 +3511,13 @@ def caja():
     movimiento_dias_html=""
     alertas_pendientes_html=""
     if rol=="admin":
-        c.execute("""SELECT DISTINCT SUBSTRING(fecha,1,10) fd, emitido_por FROM pagos
-                     WHERE emitido_por IS NOT NULL AND fecha NOT LIKE %s
-                     ORDER BY SUBSTRING(fecha,7,4)||SUBSTRING(fecha,4,2)||SUBSTRING(fecha,1,2) DESC LIMIT 120""",('%01/01/2000%',))
+        c.execute("""SELECT DISTINCT SUBSTRING(fecha,1,10) fd, emitido_por, SUBSTRING(fecha,7,4)||SUBSTRING(fecha,4,2)||SUBSTRING(fecha,1,2) AS ord FROM pagos WHERE emitido_por IS NOT NULL AND fecha NOT LIKE %s ORDER BY ord DESC LIMIT 120""",('%01/01/2000%',))
         dias_usuarios=c.fetchall()
         c.execute("SELECT fecha,usuario FROM cierres_caja WHERE cerrado=TRUE")
         cerrados_set={(r[0],r[1]) for r in c.fetchall()}
         filas_mov=""
         pendientes=[]
-        for fd,uemi in dias_usuarios:
+        for fd,uemi,_ord in dias_usuarios:
             if not fd or not uemi: continue
             t=_totales_caja(fd,uemi)
             if t["_total"]<=0: continue
