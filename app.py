@@ -2841,8 +2841,7 @@ def cuenta(id):
     _hoy=_dt.now()
     ultimos_meses=[]
     for _m in range(24):
-        _mes=(_hoy.month - _m - 1) % 12 + 1
-        _anio=_hoy.year - ((_hoy.month - _m - 1) // 12 + (1 if _hoy.month-_m-1 < 0 else 0))
+            _idx0=(_hoy.year*12+(_hoy.month-1))-_m; _mes=_idx0%12+1        ; _anio=_idx0//12
         ultimos_meses.append(f"{_mes:02d}/{_anio}")
     # Show periods with debt first (checked), then unchecked months
     periodos_set=set(periodos_deudores)
@@ -4363,8 +4362,15 @@ def ver_recibo_consolidado(cliente_id):
     abono_cli=float(abono_cli or 0)
 
     # Get amounts per period - use pagos table as source of truth
-    c.execute("SELECT periodo,COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s GROUP BY periodo",(cliente_id,))
-    pagos_por_periodo={r[0]:float(r[1]) for r in c.fetchall()}
+        c.execute("SELECT periodo,monto,periodos_incluidos FROM pagos WHERE cliente_id=%s",(cliente_id,))
+        pagos_por_periodo={}
+        for r in c.fetchall():
+            _per0,_monto0,_inc0=r[0],float(r[1] or 0),r[2]
+            _plist=[p.strip() for p in _inc0.split(",")] if _inc0 else [_per0]
+            _n=len(_plist) or 1
+            _share=_monto0/_n
+            for _p in _plist:
+                pagos_por_periodo[_p]=pagos_por_periodo.get(_p,0)+_share
 
     c.execute("SELECT periodo,COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s",(cliente_id,))
     cuentas_dict={(r[0]):(float(r[1]),float(r[2])) for r in c.fetchall()}
@@ -4373,7 +4379,9 @@ def ver_recibo_consolidado(cliente_id):
     total_real=0
     n_periodos=len(periodos)
     for per in periodos:
-        if total_manual>0 and n_periodos>0:
+        if pagos_por_periodo.get(per,0)>0:
+            monto=round(pagos_por_periodo[per])
+        elif total_manual>0 and n_periodos>0:
             monto=round(total_manual/n_periodos)
         else:
             cu=cuentas_dict.get(per,(0,0))
@@ -4384,33 +4392,8 @@ def ver_recibo_consolidado(cliente_id):
     medio_pago=request.args.get("medio","Transferencia -> Natasha Carlon")
     monto_total=total_real if total_real>0 else total_manual
 
-    # Register payments in DB for each period
-    emitido=session.get("display","sistema")
-    for per,monto in detalles:
-        if monto<=0: continue
-        # Update or insert cuentas
-        cu=cuentas_dict.get(per)
-        if cu:
-            if cu[1]<monto:  # haber is less than what was paid
-                c.execute("UPDATE cuentas SET haber=%s WHERE cliente_id=%s AND periodo=%s",
-                          (monto,cliente_id,per))
-        else:
-            c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,%s)",
-                      (cliente_id,per,monto,monto))
-        # Check if pago already exists
-        c.execute("SELECT id FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
-        existing=c.fetchone()
-        if not existing:
-            periodos_str=",".join(p for p,_ in detalles)
-            try:
-                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por,concepto,periodos_incluidos) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                          (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),emitido,emitido,"Honorarios mensuales",periodos_str))
-            except:
-                conn.rollback()
-                c.execute("INSERT INTO pagos(cliente_id,periodo,monto,medio,observaciones,facturado,fecha,usuario,emitido_por) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                          (cliente_id,per,monto,medio_pago,"Recibo consolidado",False,now_ar(),emitido,emitido))
-    conn.commit()
-    conn.close()
+        # Read-only view: no database writes here (previous version fabricated payment records on GET)
+        conn.close()
 
     if not detalles or monto_total<=0:
         return "No hay montos para generar el recibo",400
