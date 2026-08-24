@@ -2841,7 +2841,7 @@ def cuenta(id):
     _hoy=_dt.now()
     ultimos_meses=[]
     for _m in range(24):
-            _idx0=(_hoy.year*12+(_hoy.month-1))-_m; _mes=_idx0%12+1        ; _anio=_idx0//12
+        _idx0=(_hoy.year*12+(_hoy.month-1))-_m; _mes=_idx0%12+1; _anio=_idx0//12
         ultimos_meses.append(f"{_mes:02d}/{_anio}")
     # Show periods with debt first (checked), then unchecked months
     periodos_set=set(periodos_deudores)
