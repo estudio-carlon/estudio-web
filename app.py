@@ -4362,38 +4362,39 @@ def ver_recibo_consolidado(cliente_id):
     abono_cli=float(abono_cli or 0)
 
     # Get amounts per period - use pagos table as source of truth
-        c.execute("SELECT periodo,monto,periodos_incluidos FROM pagos WHERE cliente_id=%s",(cliente_id,))
-        pagos_por_periodo={}
-        for r in c.fetchall():
-            _per0,_monto0,_inc0=r[0],float(r[1] or 0),r[2]
-            _plist=[p.strip() for p in _inc0.split(",")] if _inc0 else [_per0]
-            _n=len(_plist) or 1
-            _share=_monto0/_n
-            for _p in _plist:
-                pagos_por_periodo[_p]=pagos_por_periodo.get(_p,0)+_share
+    c.execute("SELECT periodo,monto,periodos_incluidos FROM pagos WHERE cliente_id=%s",(cliente_id,))
+    pagos_por_periodo={}
+    for r in c.fetchall():
+        _per0,_monto0,_inc0=r[0],float(r[1] or 0),r[2]
+        _plist=[p.strip() for p in _inc0.split(",")] if _inc0 else [_per0]
+        _n=len(_plist) or 1
+        _share=_monto0/_n
+        for _p in _plist:
+            pagos_por_periodo[_p]=pagos_por_periodo.get(_p,0)+_share
 
     c.execute("SELECT periodo,COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s",(cliente_id,))
     cuentas_dict={(r[0]):(float(r[1]),float(r[2])) for r in c.fetchall()}
+    # Read-only view: no database writes here
+    conn.close()
 
     detalles=[]
     total_real=0
     n_periodos=len(periodos)
     for per in periodos:
-        if pagos_por_periodo.get(per,0)>0:
+        cu=cuentas_dict.get(per,(0,0))
+        if cu[1]>0:
+            monto=round(cu[1])
+        elif pagos_por_periodo.get(per,0)>0:
             monto=round(pagos_por_periodo[per])
         elif total_manual>0 and n_periodos>0:
             monto=round(total_manual/n_periodos)
         else:
-            cu=cuentas_dict.get(per,(0,0))
-            monto=cu[1] if cu[1]>0 else (cu[0] if cu[0]>0 else abono_cli)
+            monto=round(cu[0]) if cu[0]>0 else round(abono_cli)
         detalles.append((per,monto))
         total_real+=monto
 
     medio_pago=request.args.get("medio","Transferencia -> Natasha Carlon")
     monto_total=total_real if total_real>0 else total_manual
-
-        # Read-only view: no database writes here (previous version fabricated payment records on GET)
-        conn.close()
 
     if not detalles or monto_total<=0:
         return "No hay montos para generar el recibo",400
@@ -4403,7 +4404,6 @@ def ver_recibo_consolidado(cliente_id):
     fname="recibo_consolidado_"+cli_nombre.replace(" ","_")[:20]+".pdf"
     return send_file(pdf,mimetype="application/pdf",
                      as_attachment=bool(dl),download_name=fname)
-
 
 def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_total):
     """Genera recibo PDF con múltiples períodos"""
