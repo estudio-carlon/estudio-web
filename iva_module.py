@@ -124,7 +124,15 @@ def register_iva(app):
                     bad_iva = f'<span class="badge bp">Saldo a favor {fmt(saldo_final)}</span>'
                 else:
                     bad_iva = '<span class="badge bpar">Sin saldo</span>'
+                resultado_txt = (f"IVA a pagar {fmt(abs(saldo_final))}" if saldo_final < 0
+                                  else f"Saldo a favor {fmt(saldo_final)}" if saldo_final > 0
+                                  else "Sin saldo")
+                chk_html = (f'<input type="checkbox" class="chkRep" '
+                            f'data-nombre="{nombre}" data-deb="{fmt(deb_fiscal)}" data-cred="{fmt(cred_fiscal)}" '
+                            f'data-resultado="{resultado_txt}" data-neto="{fmt(neto_ventas_iibb)}" data-iibb="{fmt(iibb_neto)}" '
+                            f'{"checked" if saldo_final != 0 else ""}>')
                 filas += f'''<tr>
+                    <td>{chk_html}</td>
                     <td class="nm">{nombre}</td>
                     <td>{fmt(deb_fiscal)}</td>
                     <td>{fmt(cred_fiscal)}</td>
@@ -143,8 +151,12 @@ def register_iva(app):
             <a class="btn btn-o btn-sm" href="/iva?mes={nm}&anio={na}">Siguiente &rarr;</a>
         </div>
         <h3 style="font-size:1rem;margin:16px 0 8px">Responsables Inscriptos</h3>
+        <div class="arow" style="margin-bottom:8px">
+            <button type="button" class="btn btn-p btn-sm" id="btnDescargarRep">&#11015; Descargar Reporte</button>
+            <span style="color:var(--muted);font-size:.85rem;margin-left:8px">Se incluyen los clientes tildados (IVA a pagar / Saldo a favor)</span>
+        </div>
         <div class="dtable"><table>
-            <thead><tr><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
+            <thead><tr><th></th><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
             <tbody>{filas or "<tr><td colspan=7 style='color:var(--muted);text-align:center;padding:16px'>Sin responsables inscriptos</td></tr>"}</tbody>
         </table></div>
         <div class="mo" id="miva"><div class="modal">
@@ -227,6 +239,20 @@ def register_iva(app):
             document.getElementById('f_esmono').value=esMono?'1':'0';
             document.getElementById('fieldsetIva').style.display=esMono?'none':'';
             document.getElementById('miva').classList.add('on');
+        }});
+        document.getElementById('btnDescargarRep').addEventListener('click', function(){{
+            var rows = document.querySelectorAll('.chkRep:checked');
+            if(rows.length === 0){{ alert('No hay clientes tildados para el reporte.'); return; }}
+            var csv = 'Cliente;Debito Fiscal;Credito Fiscal;Resultado IVA;Neto Ventas IIBB;IIBB Neto\\n';
+            rows.forEach(function(r){{
+                csv += [r.dataset.nombre, r.dataset.deb, r.dataset.cred, r.dataset.resultado, r.dataset.neto, r.dataset.iibb].join(';') + '\\n';
+            }});
+            var blob = new Blob([csv], {{type:'text/csv;charset=utf-8;'}});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = 'reporte_iva_{MESES_NOM[mes]}_{anio}.csv';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }});
         </script>
         '''
