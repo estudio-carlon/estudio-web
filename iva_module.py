@@ -152,8 +152,9 @@ def register_iva(app):
         </div>
         <h3 style="font-size:1rem;margin:16px 0 8px">Responsables Inscriptos</h3>
         <div class="arow" style="margin-bottom:8px">
-            <button type="button" class="btn btn-p btn-sm" id="btnDescargarRep">&#11015; Descargar Reporte</button>
-            <span style="color:var(--muted);font-size:.85rem;margin-left:8px">Se incluyen los clientes tildados (IVA a pagar / Saldo a favor)</span>
+            <button type="button" class="btn btn-o btn-sm" id="btnVerRep">&#128065; Ver Reporte</button>
+                <button type="button" class="btn btn-p btn-sm" id="btnDescargarRep">&#11015; Descargar PDF</button>
+                <span style="color:var(--muted);font-size:.85rem;margin-left:8px">Se incluyen los clientes tildados (IVA a pagar / Saldo a favor). Ver o descargar el archivo es opcional.</span>
         </div>
         <div class="dtable"><table>
             <thead><tr><th></th><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas (IIBB)</th><th>IIBB estimado</th><th></th></tr></thead>
@@ -240,20 +241,34 @@ def register_iva(app):
             document.getElementById('fieldsetIva').style.display=esMono?'none':'';
             document.getElementById('miva').classList.add('on');
         }});
-        document.getElementById('btnDescargarRep').addEventListener('click', function(){{
-            var rows = document.querySelectorAll('.chkRep:checked');
-            if(rows.length === 0){{ alert('No hay clientes tildados para el reporte.'); return; }}
-            var csv = 'Cliente;Debito Fiscal;Credito Fiscal;Resultado IVA;Neto Ventas IIBB;IIBB Neto\\n';
-            rows.forEach(function(r){{
-                csv += [r.dataset.nombre, r.dataset.deb, r.dataset.cred, r.dataset.resultado, r.dataset.neto, r.dataset.iibb].join(';') + '\\n';
+        document.getElementById('btnVerRep').addEventListener('click', function(){{
+                abrirReporteIva(false);
             }});
-            var blob = new Blob([csv], {{type:'text/csv;charset=utf-8;'}});
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url; a.download = 'reporte_iva_{MESES_NOM[mes]}_{anio}.csv';
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }});
+            document.getElementById('btnDescargarRep').addEventListener('click', function(){{
+                abrirReporteIva(true);
+            }});
+            function armarReporteIvaHtml(){{
+                var rows = document.querySelectorAll('.chkRep:checked');
+                if(rows.length === 0){{ return null; }}
+                var filas = '';
+                rows.forEach(function(r){{ filas += '<tr><td>'+r.dataset.nombre+'</td><td>'+r.dataset.deb+'</td><td>'+r.dataset.cred+'</td><td>'+r.dataset.resultado+'</td><td>'+r.dataset.neto+'</td><td>'+r.dataset.iibb+'</td></tr>'; }});
+                return '<!doctype html><html><head><meta charset="utf-8"><title>Reporte IVA / IIBB - {MESES_NOM[mes]} {anio}</title>'
+                + '<style>body{{font-family:Arial,sans-serif;padding:24px;color:#222}} table{{width:100%;border-collapse:collapse;margin-top:12px}} th,td{{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:.9rem}} th{{background:#f0f0f0}} h2{{margin-bottom:4px}} .sub{{color:#666;margin-bottom:16px}} .no-print button{{padding:8px 14px;font-size:.9rem;cursor:pointer;margin-right:8px}} @media print{{.no-print{{display:none}}}}</style>'
+                + '</head><body>'
+                + '<div class="no-print"><button onclick="window.print()">Descargar como PDF</button> <button onclick="window.close()">Cerrar</button></div>'
+                + '<h2>Reporte de Control IVA / IIBB</h2>'
+                + '<p class="sub">Estudio Carlon - Periodo: {MESES_NOM[mes]} {anio}</p>'
+                + '<table><thead><tr><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas IIBB</th><th>IIBB Neto</th></tr></thead><tbody>'
+                + filas + '</tbody></table></body></html>';
+            }}
+            function abrirReporteIva(descargar){{
+                var html = armarReporteIvaHtml();
+                if(html === null){{ alert('No hay clientes tildados para el reporte.'); return; }}
+                var w = window.open('', '_blank');
+                w.document.write(html);
+                w.document.close();
+                if(descargar){{ setTimeout(function(){{ w.focus(); w.print(); }}, 350); }}
+            }}
         </script>
         '''
         return page("Control IVA", body, "/iva")
