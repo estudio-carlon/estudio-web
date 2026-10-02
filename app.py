@@ -21,7 +21,7 @@ except ImportError:
     def today_ar(): return datetime.now().strftime("%d/%m/%Y")
 from io import BytesIO
 from cryptography.fernet import Fernet
-import pyotp, urllib.request, urllib.parse
+import pyotp, urllib.request, urllib.parse, urllib.error
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "estudio_carlon_ultra_secure_2026_#$@!")
@@ -1895,30 +1895,70 @@ OTRAS SECCIONES
 - Seguridad y Config (solo admin): usuarios, contraseñas, 2FA y bloqueos de IP.
 """
 
+def _respuesta_guia(pregunta):
+    """Respuesta sin IA: busca en la guia del sistema el bloque que mejor coincide con la pregunta."""
+    import unicodedata
+    def norm(t):
+        t=unicodedata.normalize("NFD",(t or "").lower())
+        return "".join(ch for ch in t if unicodedata.category(ch)!="Mn")
+    guia=ASISTENTE_SYSTEM.split("GUIA DEL SISTEMA",1)[-1]
+    bloques=[b.strip() for b in guia.split("\n\n") if b.strip() and not b.strip().startswith("(como")]
+    vacias={"como","que","para","una","uno","los","las","del","con","por","el","la","de","un","en","y","a","se",
+            "le","lo","mi","es","al","hago","puedo","donde","cual","alguien","quiero"}
+    palabras=[p for p in re.findall(r"[a-z0-9]+",norm(pregunta)) if len(p)>2 and p not in vacias]
+    mejor,puntos=None,0
+    for b in bloques:
+        nb=norm(b)
+        s=sum(nb.count(p[:6]) for p in palabras)
+        if s>puntos: mejor,puntos=b,s
+    if not mejor:
+        return None
+    return mejor.replace("- ","• ")
+
 @app.route("/asistente", methods=["POST"])
 @login_req
 def asistente():
-    try:
-        data = request.get_json()
-        mensajes = data.get("mensajes", [])
-        if not ANTHROPIC_API_KEY: return jsonify({"respuesta": None})
-        payload = json.dumps({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 700,
-            "system": ASISTENTE_SYSTEM + "\n\nEl usuario que pregunta es " + str(session.get("display","")) +
-                      " con rol: " + str(session.get("rol","secretaria")) + ".",
-            "messages": mensajes[-8:]
-        }).encode()
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={"Content-Type":"application/json","x-api-key":ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01"}
-        )
-        resp = urllib.request.urlopen(req, timeout=15)
-        result = json.loads(resp.read())
-        return jsonify({"respuesta": result["content"][0]["text"]})
-    except:
-        return jsonify({"respuesta": None})
+    data = request.get_json(silent=True) or {}
+    mensajes = [m for m in data.get("mensajes", []) if m.get("role") in ("user","assistant") and m.get("content")]
+    # La API exige que la conversacion empiece con un mensaje del usuario
+    while mensajes and mensajes[0]["role"]!="user": mensajes.pop(0)
+    pregunta = mensajes[-1]["content"] if mensajes else ""
+    es_admin = session.get("rol")=="admin"
+    motivo = ""
+    if not ANTHROPIC_API_KEY:
+        motivo = "falta configurar la variable ANTHROPIC_API_KEY en Render (Environment)"
+    else:
+        try:
+            payload = json.dumps({
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 700,
+                "system": ASISTENTE_SYSTEM + "\n\nEl usuario que pregunta es " + str(session.get("display","")) +
+                          " con rol: " + str(session.get("rol","secretaria")) + ".",
+                "messages": mensajes[-8:]
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages",
+                data=payload,
+                headers={"Content-Type":"application/json","x-api-key":ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01"}
+            )
+            resp = urllib.request.urlopen(req, timeout=25)
+            result = json.loads(resp.read())
+            return jsonify({"respuesta": result["content"][0]["text"]})
+        except urllib.error.HTTPError as e:
+            try: detalle = json.loads(e.read()).get("error",{}).get("message","")
+            except Exception: detalle = ""
+            if e.code == 401: motivo = "la clave ANTHROPIC_API_KEY de Render no es valida (revisala o generá una nueva)"
+            elif "credit" in detalle.lower(): motivo = "la cuenta de la API de Anthropic no tiene saldo (cargar creditos en console.anthropic.com)"
+            else: motivo = f"error {e.code} de la API: {detalle[:150]}"
+        except Exception as e:
+            motivo = f"no se pudo conectar con la IA ({type(e).__name__})"
+        try: registrar_evento_seguridad("ASISTENTE_ERROR", motivo, get_ip())
+        except Exception: pass
+    # Plan B: responder con la guia del sistema aunque la IA no este disponible
+    texto = _respuesta_guia(pregunta) or "En este momento no puedo responder esa consulta. Para dudas impositivas, consultá ARCA o Rentas."
+    if es_admin and motivo:
+        texto += "\n\n⚠ (Solo lo ve el admin) El asistente con IA no está funcionando: " + motivo + "."
+    return jsonify({"respuesta": texto})
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CLIENTES
