@@ -3505,47 +3505,143 @@ def caja():
         c.execute("SELECT id,fecha,usuario,efectivo,cheque,dolares,transferencia_nat,transferencia_mai,otro,total_fisico,total_general,cerrado,hora_cierre,detalle_pagos FROM cierres_caja WHERE usuario=%s AND fecha=%s ORDER BY id DESC LIMIT 5",(usuario,fecha_hoy))
     cierres=c.fetchall()
 
-    # Admin: movimiento real de caja dia por dia, aunque el secretario no haya cerrado,
-    # + alerta de cajas pendientes de cierre.
+    # ── Admin: historial DIA A DIA de recibos emitidos ──────────────────────────
+    #   * Muestra todos los días del rango, aunque no haya habido cobros.
+    #   * Por cada secretaria/o muestra totales por medio y QUIÉNES PAGARON,
+    #     aunque no hayan cerrado la caja (en ese caso el detalle aparece abierto).
+    #   * Rango por defecto: últimos 30 días. Se cambia con /caja?dias=60 etc.
     movimiento_dias_html=""
     alertas_pendientes_html=""
     if rol=="admin":
-        c.execute("""SELECT DISTINCT SUBSTRING(fecha,1,10) fd, emitido_por, SUBSTRING(fecha,7,4)||SUBSTRING(fecha,4,2)||SUBSTRING(fecha,1,2) AS ord FROM pagos WHERE emitido_por IS NOT NULL AND fecha NOT LIKE %s ORDER BY ord DESC LIMIT 120""",('%01/01/2000%',))
-        dias_usuarios=c.fetchall()
-        c.execute("SELECT fecha,usuario FROM cierres_caja WHERE cerrado=TRUE")
-        cerrados_set={(r[0],r[1]) for r in c.fetchall()}
-        filas_mov=""
-        pendientes=[]
-        for fd,uemi,_ord in dias_usuarios:
-            if not fd or not uemi: continue
-            t=_totales_caja(fd,uemi)
-            if t["_total"]<=0: continue
-            cerrado_ok=(fd,uemi) in cerrados_set
-            if not cerrado_ok and fd!=fecha_hoy:
-                pendientes.append((fd,uemi,t["_total"]))
-            if cerrado_ok:
-                est_mov='<span class="estado-cerrada">Cerrada</span>'
-            elif fd==fecha_hoy:
-                est_mov='<span class="estado-abierta">En curso</span>'
-            else:
-                est_mov='<span class="estado-abierta" style="background:#fdecea;color:#c0392b">Sin cerrar</span>'
-            its_mov=(_ci("Efectivo",t["Efectivo"],"#27AE60","min-width:68px;padding:4px 7px")+
-                      _ci("Cheque",t["Cheque"],"#2475B0","min-width:68px;padding:4px 7px")+
-                      _ci("U$S",t["Dolares"],"#E67E22","min-width:68px;padding:4px 7px")+
-                      _ci("Natasha",t["Transf. Natasha"],"#1A3A2A","min-width:68px;padding:4px 7px")+
-                      _ci("Maira",t["Transf. Maira"],"#7B68EE","min-width:68px;padding:4px 7px")+
-                      _ci("TOTAL",t["_total"],"#C8A96E","min-width:76px;padding:4px 7px;border:2px solid var(--accent)"))
-            filas_mov+=(f'<div class="caja-row"><div class="caja-header">'
-                        f'<div><span class="caja-user">{uemi}</span><span class="caja-fecha"> · {fd}</span></div>{est_mov}</div>'
-                        f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">{its_mov}</div></div>')
+        from html import escape as _esc
+        try: dias_ver=int(request.args.get("dias",30))
+        except: dias_ver=30
+        dias_ver=max(7,min(dias_ver,365))
+        hoy_dt=now_ar_dt()
+        lista_dias=[(hoy_dt-timedelta(days=i)).strftime("%d/%m/%Y") for i in range(dias_ver)]
+        set_dias=set(lista_dias)
+        anio_min=str((hoy_dt-timedelta(days=dias_ver)).year)
+
+        # Todos los recibos del rango (excluye los registros históricos 01/01/2000)
+        c.execute("""SELECT p.id, p.fecha,
+                            COALESCE(NULLIF(p.emitido_por,''),NULLIF(p.usuario,''),'Sin usuario'),
+                            COALESCE(cl.nombre,'(cliente eliminado)'),
+                            COALESCE(p.monto,0), COALESCE(p.medio,''), COALESCE(p.periodo,''),
+                            COALESCE(p.concepto,'Honorarios mensuales'), p.cliente_id
+                     FROM pagos p LEFT JOIN clientes cl ON cl.id=p.cliente_id
+                     WHERE p.fecha NOT LIKE %s AND SUBSTRING(p.fecha,7,4) >= %s
+                     ORDER BY p.id""", ('%01/01/2000%', anio_min))
+        pagos_por_dia={}
+        for row in c.fetchall():
+            fd=(row[1] or "")[:10]
+            if fd not in set_dias: continue
+            pagos_por_dia.setdefault(fd,{}).setdefault(row[2],[]).append(row)
+
+        c.execute("SELECT fecha,usuario,hora_cierre FROM cierres_caja WHERE cerrado=TRUE")
+        cierres_map={(r[0],r[1]):(r[2] or "") for r in c.fetchall()}
+
+        MED=[("Efectivo","Efectivo","#27AE60"),("Cheque","Cheque","#2475B0"),
+             ("Dolares","U$S","#E67E22"),("Transf. Natasha","Natasha","#1A3A2A"),
+             ("Transf. Maira","Maira","#7B68EE"),("Otro","Otro","#888")]
+        def _medio_key(m):
+            m=(m or "").lower()
+            if "efectivo" in m: return "Efectivo"
+            if "cheque" in m: return "Cheque"
+            if "dolar" in m or "u$s" in m: return "Dolares"
+            if "natasha" in m: return "Transf. Natasha"
+            if "maira" in m: return "Transf. Maira"
+            return "Otro"
+
+        DIAS_SEM=["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]
+        filas_mov=""; pendientes=[]
+        total_rango=0.0; recibos_rango=0
+        for fd in lista_dias:
+            dt=datetime.strptime(fd,"%d/%m/%Y")
+            dia_txt=DIAS_SEM[dt.weekday()]+" "+fd
+            por_usr=pagos_por_dia.get(fd,{})
+
+            # Día sin cobros: igual aparece
+            if not por_usr:
+                filas_mov+=('<div class="caja-row cerrada" style="padding:10px 18px;border-left-color:var(--border)">'
+                            '<div class="caja-header" style="margin-bottom:0">'
+                            '<span class="caja-user" style="font-size:.88rem">'+dia_txt+'</span>'
+                            '<span style="font-size:.76rem;color:var(--muted)">Sin cobros registrados</span>'
+                            '</div></div>')
+                continue
+
+            total_dia=0.0; n_dia=0; bloques=""
+            for uemi in sorted(por_usr):
+                rows=por_usr[uemi]
+                t={k:0.0 for k,_l,_c in MED}
+                for r in rows: t[_medio_key(r[5])]+=float(r[4] or 0)
+                total_u=sum(t.values()); total_dia+=total_u; n_dia+=len(rows)
+
+                hora_c=cierres_map.get((fd,uemi))
+                if hora_c is not None:
+                    est='<span class="estado-cerrada">Cerrada '+_esc(hora_c)+'</span>'
+                elif fd==fecha_hoy:
+                    est='<span class="estado-abierta">En curso</span>'
+                else:
+                    est='<span class="estado-abierta" style="background:#fdecea;color:#c0392b">Sin cerrar</span>'
+                    pendientes.append((fd,uemi,total_u))
+
+                chips="".join(_ci(lbl,t[k],col,"min-width:68px;padding:4px 7px") for k,lbl,col in MED if t[k]>0)
+                chips+=_ci("TOTAL",total_u,"#C8A96E","min-width:76px;padding:4px 7px;border:2px solid var(--accent)")
+
+                items=""
+                for r in rows:
+                    pid,fecha_p,_u,cli_nom,monto,medio,periodo,concepto,cid=r
+                    hora=(fecha_p or "")[11:16]
+                    det=_esc(medio)
+                    if periodo: det+=" · Período "+_esc(periodo)
+                    if concepto and concepto!="Honorarios mensuales": det+=" · "+_esc(concepto)
+                    link=('<a href="/recibo/'+str(cid)+'/'+periodo.replace("/","-")+'" target="_blank" '
+                          'class="btn btn-xs btn-o">📄 Recibo</a>') if (periodo and cid) else ""
+                    items+=('<div class="caja-cliente-item" style="align-items:center">'
+                            '<span><b>'+_esc(cli_nom)+'</b> <span style="color:var(--muted)">'
+                            +hora+' · '+det+'</span></span>'
+                            '<span style="display:flex;gap:6px;align-items:center;white-space:nowrap">'
+                            '<b>'+fmt(monto)+'</b>'+link+'</span></div>')
+
+                abierto=" open" if hora_c is None else ""
+                bloques+=('<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">'
+                          '<div class="caja-header" style="margin-bottom:6px">'
+                          '<span style="font-weight:600;color:var(--primary)">👤 '+_esc(uemi)+'</span>'+est+'</div>'
+                          '<div style="display:flex;gap:7px;flex-wrap:wrap">'+chips+'</div>'
+                          '<details class="caja-detalle"'+abierto+'>'
+                          '<summary>👥 Quiénes pagaron ('+str(len(rows))+')</summary>'
+                          '<div class="caja-detalle-body">'+items+'</div></details></div>')
+
+            total_rango+=total_dia; recibos_rango+=n_dia
+            filas_mov+=('<div class="caja-row" style="border-left-color:var(--accent)">'
+                        '<div class="caja-header" style="margin-bottom:0">'
+                        '<span class="caja-user">'+dia_txt+'</span>'
+                        '<span style="font-weight:700;color:var(--primary)">'+str(n_dia)+' recibo(s) · '+fmt(total_dia)+'</span>'
+                        '</div>'+bloques+'</div>')
+
         if pendientes:
-            items_pend="".join(f"<li>{u} — {fd} · {fmt(tot)}</li>" for fd,u,tot in pendientes[:20])
-            alertas_pendientes_html=(f'<div class="warn-box" style="margin-bottom:16px">'
-                f'<b>⚠ Caja pendiente de cerrar ({len(pendientes)}):</b>'
-                f'<ul style="margin:6px 0 0 18px;padding:0">{items_pend}</ul></div>')
-        movimiento_dias_html=(f'<div class="fcard" style="margin-bottom:16px"><h3>📅 Movimiento diario real</h3>'
-            f'<p style="color:var(--muted);font-size:.8rem;margin-bottom:10px">Se arma directamente desde los cobros cargados, aunque el secretario se haya olvidado de cerrar la caja ese dia.</p>'
-            f'{filas_mov or "<p style=\'color:var(--muted);font-size:.84rem\'>Sin movimientos</p>"}</div>')
+            items_pend="".join("<li>"+_esc(u)+" — "+fd+" · "+fmt(tot)+"</li>" for fd,u,tot in pendientes[:30])
+            alertas_pendientes_html=('<div class="warn-box" style="margin-bottom:16px">'
+                '<b>⚠ Caja pendiente de cerrar ('+str(len(pendientes))+'):</b>'
+                '<ul style="margin:6px 0 0 18px;padding:0">'+items_pend+'</ul></div>')
+
+        rango_btns="".join(
+            '<a href="/caja?dias='+str(n)+'" class="btn btn-xs '+("btn-p" if n==dias_ver else "btn-o")+'">'+str(n)+' días</a>'
+            for n in (15,30,60,90))
+        abrir_tab=('<script>document.addEventListener("DOMContentLoaded",function(){'
+                   'var b=document.querySelector("button[onclick*=\'tmo\']");if(b)b.click();});</script>'
+                   ) if request.args.get("dias") else ""
+
+        movimiento_dias_html=('<div class="fcard" style="margin-bottom:16px">'
+            '<h3>📅 Historial día a día de recibos emitidos</h3>'
+            '<p style="color:var(--muted);font-size:.8rem;margin-bottom:10px">'
+            'Se arma directamente desde los recibos cargados, aunque no se haya cerrado la caja. '
+            'Aparecen todos los días, incluso los que no tuvieron cobros.</p>'
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+            '<span style="font-size:.78rem;color:var(--muted)">Mostrar:</span>'+rango_btns+
+            '<span style="margin-left:auto;font-size:.82rem;font-weight:700;color:var(--primary)">'
+            +str(recibos_rango)+' recibos · '+fmt(total_rango)+'</span></div>'
+            +filas_mov+'</div>'+abrir_tab)
     conn.close()
 
     # Items caja hoy - todos los medios siempre visibles
