@@ -521,6 +521,36 @@ def init_db():
         periodo_despues TEXT, monto_despues REAL, medio_despues TEXT, detalle TEXT)""")
     for _col in ("nombre_ocasional","cuit_ocasional","telefono_ocasional"):
         c.execute(f"ALTER TABLE pagos ADD COLUMN IF NOT EXISTS {_col} TEXT")
+    c.execute("ALTER TABLE recibos_log ADD COLUMN IF NOT EXISTS numero_recibo INTEGER")
+    # Numeracion correlativa de recibos: la asigna la base al insertar cada pago
+    c.execute("SELECT pg_advisory_xact_lock(424242)")
+    c.execute("CREATE SEQUENCE IF NOT EXISTS recibo_seq")
+    c.execute("ALTER TABLE pagos ADD COLUMN IF NOT EXISTS numero_recibo INTEGER")
+    c.execute("""UPDATE pagos p SET numero_recibo=s.n FROM (
+                   SELECT id, ROW_NUMBER() OVER (ORDER BY id)
+                          + COALESCE((SELECT MAX(numero_recibo) FROM pagos),0) AS n
+                   FROM pagos WHERE numero_recibo IS NULL AND COALESCE(fecha,'') NOT LIKE '%%01/01/2000%%') s
+                 WHERE p.id=s.id""")
+    c.execute("SELECT COALESCE(MAX(numero_recibo),0) FROM pagos")
+    _maxn=c.fetchone()[0]
+    c.execute("SELECT last_value, is_called FROM recibo_seq")
+    _lv,_called=c.fetchone()
+    if (_lv if _called else 0) < _maxn:
+        c.execute("SELECT setval('recibo_seq', %s, true)",(_maxn,))
+    c.execute("""CREATE OR REPLACE FUNCTION asignar_numero_recibo() RETURNS trigger AS $f$
+                 BEGIN
+                   IF NEW.numero_recibo IS NULL AND COALESCE(NEW.fecha,'') NOT LIKE '%01/01/2000%' THEN
+                     NEW.numero_recibo := nextval('recibo_seq');
+                   END IF;
+                   RETURN NEW;
+                 END $f$ LANGUAGE plpgsql""")
+    c.execute("DROP TRIGGER IF EXISTS trg_numero_recibo ON pagos")
+    c.execute("CREATE TRIGGER trg_numero_recibo BEFORE INSERT ON pagos FOR EACH ROW EXECUTE FUNCTION asignar_numero_recibo()")
+    # Solicitudes de secretarias para borrar/modificar recibos (las aprueba el admin)
+    c.execute("""CREATE TABLE IF NOT EXISTS solicitudes_recibo(
+        id SERIAL PRIMARY KEY, fecha TEXT, usuario TEXT, tipo TEXT, cliente_id INTEGER,
+        persona TEXT, datos TEXT, resumen TEXT, motivo TEXT, estado TEXT DEFAULT 'PENDIENTE',
+        resuelto_por TEXT, fecha_resolucion TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS config_seguridad(
         id SERIAL PRIMARY KEY,clave TEXT UNIQUE,valor TEXT)""")
     conn.commit()
@@ -619,20 +649,25 @@ def registrar_auditoria(accion,detalle,cliente_id=None,cliente_nombre=""):
 def _pagos_para_log(c, where, params):
     """Devuelve los pagos (con nombre de cliente u ocasional) que cumplen la condicion."""
     c.execute("""SELECT p.id,p.cliente_id,COALESCE(cl.nombre,p.nombre_ocasional,'?'),p.fecha,
-                        p.periodo,COALESCE(p.monto,0),p.medio,p.emitido_por
+                        p.periodo,COALESCE(p.monto,0),p.medio,p.emitido_por,p.numero_recibo
                  FROM pagos p LEFT JOIN clientes cl ON cl.id=p.cliente_id WHERE """+where, params)
     return c.fetchall()
 
-def registrar_recibo_log(c, accion, pago, despues=None, detalle=""):
+def num_recibo(n):
+    """Formato del numero de recibo: 0001-00000125"""
+    try: return f"0001-{int(n):08d}"
+    except Exception: return ""
+
+def registrar_recibo_log(c, accion, pago, despues=None, detalle="", usuario=None, rol=None):
     """Guarda en recibos_log una baja o modificacion de recibo. Usa el cursor de la transaccion."""
     try:
-        pid,cid,persona,fecha_rec,per,monto,medio,emitido=pago
+        pid,cid,persona,fecha_rec,per,monto,medio,emitido,numero=pago
         per_d,monto_d,medio_d=(despues or (None,None,None))
         c.execute("""INSERT INTO recibos_log(fecha,usuario,rol,accion,pago_id,cliente_id,persona,fecha_recibo,
-                     emitido_por,periodo_antes,monto_antes,medio_antes,periodo_despues,monto_despues,medio_despues,detalle)
-                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                  (now_ar(),session.get("display",session.get("user","?")),session.get("rol",""),accion,
-                   pid,cid,persona,fecha_rec,emitido,per,monto,medio,per_d,monto_d,medio_d,detalle))
+                     emitido_por,periodo_antes,monto_antes,medio_antes,periodo_despues,monto_despues,medio_despues,detalle,numero_recibo)
+                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                  (now_ar(),usuario or session.get("display",session.get("user","?")),rol or session.get("rol",""),accion,
+                   pid,cid,persona,fecha_rec,emitido,per,monto,medio,per_d,monto_d,medio_d,detalle,numero))
     except Exception:
         pass
 
@@ -1248,6 +1283,8 @@ def panel():
       <a href="/agenda" class="btn btn-o">Agenda</a>
       <a href="/seguridad" class="btn btn-r">🔒 Seguridad</a>
       <a href="/configuracion" class="btn btn-o">⚙️ Config</a>
+      <a href="/honorarios" class="btn btn-o">💲 Honorarios</a>
+      <a href="/backup" class="btn btn-o">💾 Copia de seguridad</a>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
     <script>
@@ -1271,7 +1308,13 @@ def panel():
     new Chart(document.getElementById('ch4'),{{type:'line',data:{{labels:P,datasets:[{{label:'Ingresos',data:CI,borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,0.07)',fill:true,tension:0.35,pointRadius:3,pointBackgroundColor:'#1D9E75'}},{{label:'Gastos',data:CG,borderColor:'#E24B4A',backgroundColor:'rgba(226,75,74,0.05)',fill:true,tension:0.35,pointRadius:3,pointBackgroundColor:'#E24B4A',borderDash:[5,3]}}]}},options:base}});
     </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
-    return page("Panel", body, "Panel")
+    _al = html_alerta_backup()
+    _ns = n_solicitudes_pendientes()
+    if _ns:
+        _al += (f'<div class="warn-box" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+                f'<span>✋ <b>{_ns} solicitud(es)</b> de secretarias para borrar o modificar recibos esperan tu aprobación.</span>'
+                f'<a href="/solicitudes" class="btn btn-a btn-sm">Revisar</a></div>')
+    return page("Panel", _al + body, "Panel")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  PANEL DE SEGURIDAD
@@ -1787,6 +1830,11 @@ def configuracion():
     document.getElementById('mc-clave2').addEventListener('input',chkMatch);
     </script>
     <style>@media(max-width:700px){{.twocol{{grid-template-columns:1fr!important}}}}</style>"""
+    body = ('<div class="fcard" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+            '<span>💾 <b>Copia de seguridad</b> · descargá toda la información del sistema · '
+            '💲 <b>Honorarios</b> · tabla del Consejo y aumentos</span>'
+            '<span style="display:flex;gap:6px"><a href="/backup" class="btn btn-g btn-sm">Copia de seguridad</a>'
+            '<a href="/honorarios" class="btn btn-o btn-sm">Honorarios</a></span></div>') + body
     return page("Configuración", body, "⚙️ Config")
 
 @app.route("/configuracion/mi_2fa")
@@ -1856,7 +1904,17 @@ CLIENTES Y COBROS
 - En la Cuenta del cliente se registra el pago: "Honorario mensual" (un periodo), "Varios periodos"
   (un pago que cubre varios meses) o "Concepto libre" (certificaciones, DDJJ, tramites). Desde ahi
   se ve, descarga o envia por WhatsApp/email el recibo.
-- Editar un pago: en el Historial de la cuenta, boton del lapiz. Eliminar: boton del tacho.
+- Editar un pago: en el Historial de la cuenta, boton del lapiz (hay que escribir el motivo).
+  Eliminar: boton del tacho (pide el motivo). Tambien se pueden marcar varios periodos y "Eliminar seleccionados".
+- IMPORTANTE: las secretarias NO borran ni modifican recibos directamente. Al hacerlo se envia una
+  SOLICITUD al administrador (aparece el mensaje "Solicitud enviada") y el cambio se aplica recien cuando
+  el admin la aprueba. El admin las ve en Caja -> boton "✋ Solicitudes" y tambien un aviso en el Panel.
+  Cada uno puede ver el estado de sus solicitudes (Pendiente / Aprobada / Rechazada) en "✋ Solicitudes".
+
+NUMERO DE RECIBO (NUEVO)
+- Cada recibo tiene un numero unico y correlativo con formato 0001-00000125, que figura en el PDF,
+  en la caja y en el historial. Si se elimina un recibo su numero no se reutiliza (queda el hueco
+  registrado en "Recibos modificados/eliminados").
 
 COBRO A NO-CLIENTE (NUEVO)
 - Sirve para cobrar a alguien que NO es cliente mensual (por ejemplo una consulta o un tramite suelto).
@@ -1887,6 +1945,38 @@ CAJA
   como era antes. En las modificaciones se ve el antes tachado y el despues. Si lo hizo una
   secretaria aparece la marca "Sec.". Registra desde que se activo la funcion (lo borrado antes no figura).
   Las secretarias no ven esta solapa.
+
+DEUDORES Y RECORDATORIOS POR WHATSAPP (NUEVO)
+- Menu Deudores: lista de clientes con saldo, con los periodos que adeudan y la fecha del ultimo recordatorio.
+- Boton "📱 Recordar" en cada cliente: abre WhatsApp con el mensaje ya armado (nombre, saldo y periodos)
+  y queda registrado como "Recordado" en el mes.
+- Boton verde de arriba "📱 Enviar al siguiente": va abriendo uno por uno los WhatsApp de los deudores
+  que todavia no recibieron recordatorio este mes. Solo hay que apretar Enviar en WhatsApp y volver.
+- Filtros: saldo minimo y "solo sin recordatorio este mes". El admin puede editar el texto del mensaje
+  ("Editar mensaje de recordatorio") usando {nombre}, {saldo} y {periodos}.
+- Si un cliente no tiene telefono cargado dice "Sin telefono": cargarlo en Editar cliente.
+
+HONORARIOS (NUEVO, solo admin)
+- Pantalla "💲 Honorarios" (desde Clientes, Panel o Config). Tiene tres solapas:
+  1) Recomendaciones por cliente: compara el abono de cada cliente con la tabla de Honorarios Minimos
+     Eticos del CPCE Santiago del Estero (Res. 06/2026, vigente desde 01/07/2026). El minimo se calcula
+     con el tramo impositivo (IVA-IIBB para Responsables Inscriptos, Monotributo segun categoria, con o
+     sin Convenio Multilateral) mas la liquidacion de sueldos si tiene empleados cargados.
+     Para cada cliente se elige el tramo en la lista desplegable (por defecto se toma el mas bajo segun
+     su condicion fiscal). Se marcan los clientes y "Actualizar marcados al minimo" cambia el abono.
+     Opcion: aplicar tambien a la deuda del mes actual si el cliente todavia no pago.
+  2) Aumento por %: elegir porcentaje, grupo de clientes (condicion fiscal o solo con empleados) y
+     redondeo; primero muestra una vista previa y nada cambia hasta confirmar.
+  3) Tabla del Consejo: los montos editables. Cuando salga una nueva resolucion se actualizan alli
+     (o con "Aplicar % a la tabla") y las recomendaciones se recalculan solas.
+- En Novedades hay una solapa "💲 Honorarios minimos" con la tabla completa para consultar (todos la ven).
+- En "Cobro a no-cliente" aparecen de referencia los minimos de consulta verbal, escrita, certificacion, etc.
+
+COPIA DE SEGURIDAD (NUEVO, solo admin)
+- Config o Panel -> "💾 Copia de seguridad" -> "Descargar copia de seguridad". Baja un .zip con una
+  planilla CSV por tabla (se abre con Excel) y un archivo backup.sql para restaurar todo.
+- Conviene hacerlo una vez por semana y guardarlo en Google Drive. Si pasan mas de 7 dias sin copia,
+  el Panel muestra un aviso. El archivo tiene datos de los clientes: no compartirlo.
 
 OTRAS SECCIONES
 - Deudores, Gastos, Sueldos y F.931 (estado de recibos, 931 y VEP por cliente con empleados),
@@ -2092,6 +2182,7 @@ def clientes():
     <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap">
       {wa_btns}
       <a href="/exportar/excel/clientes" class="btn btn-g btn-sm">📊 Excel Clientes</a>
+      {'<a href="/honorarios" class="btn btn-o btn-sm">💲 Honorarios</a>' if session.get("rol")=="admin" else ''}
       <a href="/cobro_ocasional" class="btn btn-a btn-sm">🧾 Cobro a no-cliente</a>
     </div>
     {form_open}
@@ -2598,42 +2689,99 @@ def borrar_cliente(id):
     conn.commit();conn.close();registrar_auditoria("BAJA CLIENTE","Cliente eliminado",id,nombre);return redirect("/clientes")
 
 
+# ── Borrar / editar recibos ─────────────────────────────────────────────────
+#  El admin lo hace directo. Una secretaria genera una SOLICITUD que el admin
+#  aprueba o rechaza en Caja → "Solicitudes". Todo queda en recibos_log.
+def _exec_borrar_periodos(c, cliente_id, periodos, detalle="", usuario=None, rol=None):
+    total=0
+    for per in periodos:
+        for _p in _pagos_para_log(c,"p.cliente_id=%s AND p.periodo=%s",(cliente_id,per)):
+            registrar_recibo_log(c,"ELIMINADO",_p,detalle=detalle,usuario=usuario,rol=rol)
+            total+=float(_p[5] or 0)
+        c.execute("DELETE FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        c.execute("DELETE FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+    return total
+
+def _exec_editar_pago(c, pago_id, nuevo_per, nuevo_monto, nuevo_medio, nuevo_obs, detalle="", usuario=None, rol=None):
+    c.execute("SELECT periodo,monto,cliente_id FROM pagos WHERE id=%s",(pago_id,))
+    row=c.fetchone()
+    if not row: return None
+    per_orig,monto_orig,cid=row
+    c.execute("UPDATE cuentas SET haber=GREATEST(COALESCE(haber,0)-%s,0) WHERE cliente_id=%s AND periodo=%s",
+              (monto_orig,cid,per_orig))
+    c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cid,nuevo_per))
+    if c.fetchone():
+        c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",
+                  (nuevo_monto,cid,nuevo_per))
+    else:
+        c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",
+                  (cid,nuevo_per,nuevo_monto))
+    for _p in _pagos_para_log(c,"p.id=%s",(pago_id,)):
+        registrar_recibo_log(c,"MODIFICADO",_p,(nuevo_per,nuevo_monto,nuevo_medio),
+                             " · ".join(x for x in (detalle, nuevo_obs) if x),usuario=usuario,rol=rol)
+    c.execute("UPDATE pagos SET periodo=%s,monto=%s,medio=%s,observaciones=%s WHERE id=%s",
+              (nuevo_per,nuevo_monto,nuevo_medio,nuevo_obs,pago_id))
+    return (per_orig,monto_orig,cid)
+
+def _exec_borrar_ocasional(c, pid, detalle="", usuario=None, rol=None):
+    filas=_pagos_para_log(c,"p.id=%s AND p.cliente_id IS NULL",(pid,))
+    for _p in filas:
+        registrar_recibo_log(c,"ELIMINADO",_p,detalle=detalle,usuario=usuario,rol=rol)
+    if filas:
+        c.execute("DELETE FROM pagos WHERE id=%s AND cliente_id IS NULL",(pid,))
+    return filas
+
+def _crear_solicitud(c, tipo, cliente_id, persona, datos, resumen, motivo):
+    c.execute("""INSERT INTO solicitudes_recibo(fecha,usuario,tipo,cliente_id,persona,datos,resumen,motivo,estado)
+                 VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'PENDIENTE')""",
+              (now_ar(),session.get("display",""),tipo,cliente_id,persona,json.dumps(datos),resumen,motivo))
+    try:
+        enviar_whatsapp(f"Estudio Carlon: {session.get('display','')} pidio {resumen.lower()} de {persona}. "
+                        f"Motivo: {motivo}. Aprobalo en Caja > Solicitudes.")
+    except Exception: pass
+
+def _nombre_cliente(c, cid):
+    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cid,)); r=c.fetchone()
+    return r[0] if r else "?"
+
 @app.route("/borrar_pagos_masivo/<int:cliente_id>", methods=["POST"])
 @login_req
 def borrar_pagos_masivo(cliente_id):
     """Elimina multiples periodos de una vez"""
     periodos_raw=request.form.get("periodos_borrar","")
+    motivo=request.form.get("motivo","").strip()
     if not periodos_raw:
         return redirect(f"/cuenta/{cliente_id}")
     periodos=[p.replace("-","/").strip() for p in periodos_raw.split(",") if p.strip()]
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
-    row=c.fetchone(); nombre=row[0] if row else "?"
-    eliminados=0
-    for per in periodos:
-        for _p in _pagos_para_log(c,"p.cliente_id=%s AND p.periodo=%s",(cliente_id,per)):
-            registrar_recibo_log(c,"ELIMINADO",_p,detalle="Eliminacion masiva de periodos")
-        c.execute("DELETE FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
-        c.execute("DELETE FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
-        eliminados+=1
+    nombre=_nombre_cliente(c,cliente_id)
+    if session.get("rol")!="admin":
+        c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s AND periodo=ANY(%s)",(cliente_id,periodos))
+        tot=c.fetchone()[0]
+        _crear_solicitud(c,"BORRAR_PERIODOS",cliente_id,nombre,{"periodos":periodos},
+                         f"Eliminar periodos {', '.join(periodos)} ({fmt(tot)})",motivo or "Sin motivo")
+        conn.commit();conn.close()
+        return redirect(f"/cuenta/{cliente_id}?solicitud=1")
+    _exec_borrar_periodos(c,cliente_id,periodos,("Motivo: "+motivo) if motivo else "Eliminacion masiva de periodos")
     conn.commit();conn.close()
-    registrar_auditoria("BORRAR_MASIVO",f"Eliminados {eliminados} periodos: {','.join(periodos[:5])}",cliente_id,nombre)
+    registrar_auditoria("BORRAR_MASIVO",f"Eliminados {len(periodos)} periodos: {','.join(periodos[:5])}",cliente_id,nombre)
     return redirect(f"/cuenta/{cliente_id}")
 
 @app.route("/borrar_pago/<int:cliente_id>/<path:periodo>")
 @login_req
 def borrar_pago(cliente_id, periodo):
     periodo = periodo.replace("-","/")
+    motivo=request.args.get("motivo","").strip()
     conn=conectar();c=conn.cursor()
-    c.execute("SELECT nombre FROM clientes WHERE id=%s",(cliente_id,))
-    row=c.fetchone(); nombre=row[0] if row else "?"
+    nombre=_nombre_cliente(c,cliente_id)
     c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
     total_pago=c.fetchone()[0]
-    for _p in _pagos_para_log(c,"p.cliente_id=%s AND p.periodo=%s",(cliente_id,periodo)):
-        registrar_recibo_log(c,"ELIMINADO",_p)
-    # Delete pagos and reset cuentas
-    c.execute("DELETE FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
-    c.execute("DELETE FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
+    if session.get("rol")!="admin":
+        _crear_solicitud(c,"BORRAR_PERIODOS",cliente_id,nombre,{"periodos":[periodo]},
+                         f"Eliminar periodo {periodo} ({fmt(total_pago)})",motivo or "Sin motivo")
+        conn.commit();conn.close()
+        return redirect(f"/cuenta/{cliente_id}?solicitud=1")
+    _exec_borrar_periodos(c,cliente_id,[periodo],("Motivo: "+motivo) if motivo else "")
     conn.commit();conn.close()
     registrar_auditoria("BORRAR_PAGO",f"Eliminado pago {fmt(total_pago)} periodo {periodo}",cliente_id,nombre)
     return redirect(f"/cuenta/{cliente_id}")
@@ -2647,36 +2795,28 @@ def editar_pago():
     nuevo_monto= float(request.form.get("nuevo_monto",0) or 0)
     nuevo_medio= request.form.get("nuevo_medio","Efectivo")
     nuevo_obs  = request.form.get("nuevo_obs","").strip()
+    motivo     = request.form.get("motivo","").strip()
     if not pago_id or not cliente_id:
         return redirect(f"/cuenta/{cliente_id}")
     conn=conectar();c=conn.cursor()
-    # Obtener pago original
-    c.execute("SELECT periodo,monto,cliente_id FROM pagos WHERE id=%s",(pago_id,))
+    c.execute("SELECT periodo,monto,medio FROM pagos WHERE id=%s",(pago_id,))
     row=c.fetchone()
     if not row:
         conn.close(); return redirect(f"/cuenta/{cliente_id}")
-    per_orig,monto_orig,cid=row
-    # Revertir haber del periodo original
-    c.execute("UPDATE cuentas SET haber=GREATEST(COALESCE(haber,0)-%s,0) WHERE cliente_id=%s AND periodo=%s",
-              (monto_orig,cid,per_orig))
-    # Aplicar nuevo haber al nuevo periodo
-    c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cid,nuevo_per))
-    if c.fetchone():
-        c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",
-                  (nuevo_monto,cid,nuevo_per))
-    else:
-        c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",
-                  (cid,nuevo_per,nuevo_monto))
-    for _p in _pagos_para_log(c,"p.id=%s",(pago_id,)):
-        registrar_recibo_log(c,"MODIFICADO",_p,(nuevo_per,nuevo_monto,nuevo_medio),nuevo_obs)
-    # Actualizar el registro del pago
-    c.execute("""UPDATE pagos SET periodo=%s,monto=%s,medio=%s,observaciones=%s
-                 WHERE id=%s""",
-              (nuevo_per,nuevo_monto,nuevo_medio,nuevo_obs,pago_id))
+    if session.get("rol")!="admin":
+        nombre=_nombre_cliente(c,int(cliente_id))
+        _crear_solicitud(c,"EDITAR_PAGO",int(cliente_id),nombre,
+                         {"pago_id":int(pago_id),"periodo":nuevo_per,"monto":nuevo_monto,"medio":nuevo_medio,"obs":nuevo_obs},
+                         f"Modificar recibo: {row[0]} {fmt(row[1])} {row[2] or ''} → {nuevo_per} {fmt(nuevo_monto)} {nuevo_medio}",
+                         motivo or "Sin motivo")
+        conn.commit();conn.close()
+        return redirect(f"/cuenta/{cliente_id}?solicitud=1")
+    res=_exec_editar_pago(c,pago_id,nuevo_per,nuevo_monto,nuevo_medio,nuevo_obs,("Motivo: "+motivo) if motivo else "")
     conn.commit(); conn.close()
-    registrar_auditoria("EDITAR_PAGO",
-        f"Pago #{pago_id}: {per_orig}→{nuevo_per} | {fmt(monto_orig)}→{fmt(nuevo_monto)} | {nuevo_medio}",
-        int(cliente_id))
+    if res:
+        registrar_auditoria("EDITAR_PAGO",
+            f"Pago #{pago_id}: {res[0]}→{nuevo_per} | {fmt(res[1])}→{fmt(nuevo_monto)} | {nuevo_medio}",
+            int(cliente_id))
     return redirect(f"/cuenta/{cliente_id}")
 
 
@@ -2750,6 +2890,8 @@ def registrar_periodos(cliente_id):
 @login_req
 def cuenta(id):
     conn=conectar();c=conn.cursor();flash=""
+    if request.args.get("solicitud"):
+        flash='<div class="flash fok">✋ Solicitud enviada al administrador. El cambio se aplica cuando lo apruebe (Caja → Solicitudes).</div>'
     if request.method=="POST":
         tipo_reg=request.form.get("tipo_registro","simple")
         pago=float(request.form.get("pago",0) or 0)
@@ -2893,7 +3035,7 @@ def cuenta(id):
                 +' class="btn btn-xs btn-wa waBtn">WA</button>')
         else:
             bw=""
-        bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="return confirm(\'Eliminar pago de '+str(d[0])+'?\')" title="Eliminar">🗑</a>')
+        bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="var m=prompt(\'Eliminar pago de '+str(d[0])+'. Motivo:\');if(!m)return false;this.href=this.href.split(\'?\')[0]+\'?motivo=\'+encodeURIComponent(m);return true;" title="Eliminar">🗑</a>')
         # link recibo publico para compartir
         _base=os.getenv('BASE_URL','https://estudio-web-1.onrender.com')
         recibo_url=_base+'/recibo/'+str(id)+'/'+per_esc
@@ -3031,6 +3173,7 @@ def cuenta(id):
       <div>
         <form id="form-borrar-masivo" method="post" action="/borrar_pagos_masivo/{id}">
           <input type="hidden" name="periodos_borrar" id="input-periodos-borrar">
+          <input type="hidden" name="motivo" id="input-motivo-borrar">
         </form>
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
           <button onclick="selTodos()" class="btn btn-xs btn-o">☑ Todos</button>
@@ -3224,8 +3367,13 @@ def cuenta(id):
           <label>Observaciones</label>
           <input name="nuevo_obs" id="mep-obs" placeholder="Opcional">
         </div>
+        <div class="fg" style="margin-bottom:14px">
+          <label>Motivo del cambio *</label>
+          <input name="motivo" required placeholder="Ej: se cargó mal el monto">
+        </div>
         <div class="info-box" style="margin-bottom:12px;font-size:.78rem">
           Solo se edita el registro del pago. El saldo se recalcula automáticamente.
+          {"" if session.get("rol")=="admin" else "<br><b>Como secretaria/o, el cambio queda pendiente hasta que lo apruebe el administrador.</b>"}
         </div>
         <div class="mact">
           <button type="button" class="btn btn-o" onclick="closeM('mep')">Cancelar</button>
@@ -3281,7 +3429,8 @@ def cuenta(id):
       if(chks.length<1){{alert('Seleccioná al menos un período');return;}}
       var periodos=Array.from(chks).map(c=>c.dataset.per).join(',');
       var perDisplay=periodos.replace(/-/g,'/');
-      if(!confirm('Eliminar definitivamente los períodos: '+perDisplay+'?\\nEsto no se puede deshacer.'))return;
+      var m=prompt('Eliminar los períodos: '+perDisplay+'\\nEscribí el motivo:');if(!m)return;
+      document.getElementById('input-motivo-borrar').value=m;
       document.getElementById('input-periodos-borrar').value=periodos;
       document.getElementById('form-borrar-masivo').submit();
     }}
@@ -3418,7 +3567,7 @@ def cuenta(id):
 # ══════════════════════════════════════════════════════════════════════════════
 #  DEUDAS
 # ══════════════════════════════════════════════════════════════════════════════
-@app.route("/deudas")
+@app.route("/deudas", methods=["GET","POST"])
 @login_req
 def deudas():
     conn=conectar();c=conn.cursor()
@@ -3666,7 +3815,7 @@ def caja():
                             COALESCE(NULLIF(p.emitido_por,''),NULLIF(p.usuario,''),'Sin usuario'),
                             COALESCE(cl.nombre,p.nombre_ocasional||' (ocasional)','(cliente eliminado)'),
                             COALESCE(p.monto,0), COALESCE(p.medio,''), COALESCE(p.periodo,''),
-                            COALESCE(p.concepto,'Honorarios mensuales'), p.cliente_id
+                            COALESCE(p.concepto,'Honorarios mensuales'), p.cliente_id, p.numero_recibo
                      FROM pagos p LEFT JOIN clientes cl ON cl.id=p.cliente_id
                      WHERE p.fecha NOT LIKE %s AND SUBSTRING(p.fecha,7,4) >= %s
                      ORDER BY p.id""", ('%01/01/2000%', anio_min))
@@ -3729,9 +3878,9 @@ def caja():
 
                 items=""
                 for r in rows:
-                    pid,fecha_p,_u,cli_nom,monto,medio,periodo,concepto,cid=r
+                    pid,fecha_p,_u,cli_nom,monto,medio,periodo,concepto,cid,nrec=r
                     hora=(fecha_p or "")[11:16]
-                    det=_esc(medio)
+                    det=(("N° "+num_recibo(nrec)+" · ") if nrec else "")+_esc(medio)
                     if periodo: det+=" · Período "+_esc(periodo)
                     if concepto and concepto!="Honorarios mensuales": det+=" · "+_esc(concepto)
                     if cid:
@@ -3935,12 +4084,14 @@ def caja():
                        f'<h3>Cajas en tiempo real — hoy</h3>{cajas_live}</div>')
 
     # ── Tab: Caja en tiempo real ──
+    _nsol = n_solicitudes_pendientes() if rol=="admin" else 0
     tab_tiempo_real=(
         f'<div class="fcard" style="margin-bottom:16px">'
         f'<div style="display:flex;justify-content:space-between;align-items:center;'
         f'margin-bottom:14px;flex-wrap:wrap;gap:8px">'
         f'<span style="font-family:\'DM Serif Display\',serif;font-size:1.1rem;color:var(--primary)">Mi caja hoy</span>'
-        f'<a href="/cobro_ocasional" class="btn btn-a btn-sm">🧾 Cobro a no-cliente</a>'
+        f'<span style="display:flex;gap:6px;flex-wrap:wrap"><a href="/cobro_ocasional" class="btn btn-a btn-sm">🧾 Cobro a no-cliente</a>'
+        f'<a href="/solicitudes" class="btn btn-o btn-sm">✋ Solicitudes{(" (" + str(_nsol) + ")") if _nsol else ""}</a></span>'
         f'{estado_badge}</div>'
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{items_hoy}</div>'
         f'{btn_cierre}'
@@ -4641,13 +4792,19 @@ def ver_recibo_consolidado(cliente_id):
     if not detalles or monto_total<=0:
         return "No hay montos para generar el recibo",400
 
-    pdf=generar_pdf_consolidado(cliente_id,cli_nombre,cuit_cli,detalles,monto_total)
+    numero_rec=None
+    try:
+        conn=conectar();c=conn.cursor()
+        c.execute("SELECT MAX(numero_recibo) FROM pagos WHERE cliente_id=%s AND periodo=ANY(%s)",(cliente_id,periodos))
+        numero_rec=c.fetchone()[0];conn.close()
+    except Exception: pass
+    pdf=generar_pdf_consolidado(cliente_id,cli_nombre,cuit_cli,detalles,monto_total,numero_rec)
     dl=request.args.get("download")
     fname="recibo_consolidado_"+cli_nombre.replace(" ","_")[:20]+".pdf"
     return send_file(pdf,mimetype="application/pdf",
                      as_attachment=bool(dl),download_name=fname)
 
-def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_total):
+def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_total, numero_rec=None):
     """Genera recibo PDF con múltiples períodos"""
     buffer=BytesIO();cv=canvas.Canvas(buffer,pagesize=A4);w,h=A4
 
@@ -4672,7 +4829,7 @@ def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_to
     cv.drawString(158,h-52,"RECIBO DE PAGO")
     cv.setFillColorRGB(1,1,1);cv.setFont("Helvetica",8)
     cv.drawString(158,h-66,"Estudio Contable Carlon — Servicios Contables e Impositivos")
-    numero=datetime.now().strftime("%Y%m%d%H%M%S")
+    numero=num_recibo(numero_rec) if numero_rec else datetime.now().strftime("%Y%m%d%H%M%S")
     cv.setFont("Helvetica-Bold",9);cv.drawRightString(w-36,h-52,f"N° {numero}")
     cv.setFont("Helvetica",8);cv.drawRightString(w-36,h-66,datetime.now().strftime("%d/%m/%Y %H:%M"))
 
@@ -4760,7 +4917,7 @@ def generar_pdf_consolidado(cliente_id, cli_nombre, cuit_cli, detalles, monto_to
 
     cv.save();buffer.seek(0);return buffer
 
-def generar_pdf(cliente_id, periodo, monto, saldo_pendiente=0, datos=None):
+def generar_pdf(cliente_id, periodo, monto, saldo_pendiente=0, datos=None, numero_rec=None):
     buffer=BytesIO();cv=canvas.Canvas(buffer,pagesize=A4);w,h=A4
     if datos:
         # Recibo a persona que no es cliente: (nombre, cuit/dni, concepto, detalle, fecha)
@@ -4774,13 +4931,14 @@ def generar_pdf(cliente_id, periodo, monto, saldo_pendiente=0, datos=None):
         concepto_pago="Honorarios mensuales";detalle_pago="";fecha_pago=""
     try:
         if datos: raise Exception("ocasional")
-        c.execute("""SELECT COALESCE(concepto,'Honorarios mensuales'),COALESCE(observaciones,''),COALESCE(fecha,'')
+        c.execute("""SELECT COALESCE(concepto,'Honorarios mensuales'),COALESCE(observaciones,''),COALESCE(fecha,''),numero_recibo
                      FROM pagos WHERE cliente_id=%s AND periodo=%s ORDER BY id DESC LIMIT 1""",(cliente_id,periodo))
         rp=c.fetchone()
         if rp:
             concepto_pago=rp[0] or "Honorarios mensuales"
             detalle_pago=rp[1] or ""
             fecha_pago=rp[2] or ""
+            numero_rec=numero_rec or rp[3]
     except: pass
     conn.close()
     # Numero y fecha basados en la fecha real del pago
@@ -4793,6 +4951,8 @@ def generar_pdf(cliente_id, periodo, monto, saldo_pendiente=0, datos=None):
             numero=datetime.now().strftime("%Y%m%d%H%M%S");fecha_recibo=datetime.now().strftime("%d/%m/%Y %H:%M")
     else:
         numero=datetime.now().strftime("%Y%m%d%H%M%S");fecha_recibo=datetime.now().strftime("%d/%m/%Y %H:%M")
+    if numero_rec:
+        numero=num_recibo(numero_rec)
 
     # ── Encabezado verde ──────────────────────────────────────────────────────
     cv.setFillColorRGB(0.10,0.23,0.16);cv.rect(0,h-140,w,140,fill=1,stroke=0)
@@ -5965,8 +6125,13 @@ def novedades():
         '<button class="tab" onclick="showTab(\'t-sal\',this)">Escalas Salariales</button>'
         '<button class="tab" onclick="showTab(\'t-srt\',this)">SRT / ART</button>'
         '<button class="tab" onclick="showTab(\'t-yt\',this)">Holistor</button>'
+        '<button class="tab" onclick="showTab(\'t-hon\',this)">💲 Honorarios mínimos</button>'
         '</div>'
     )
+    try:
+        t_hon = '<div id="t-hon" class="tabpanel">' + html_honorarios_novedades() + '</div>'
+    except Exception:
+        t_hon = '<div id="t-hon" class="tabpanel"><div class="info-box">No se pudo cargar la tabla de honorarios.</div></div>'
 
     t_imp = (
         '<div id="t-imp" class="tabpanel on">'
@@ -6003,7 +6168,7 @@ def novedades():
         '<div class="fcard" style="margin-bottom:0"><h3>CPCESE — Honorarios y Cursos</h3>'
         '<div style="display:flex;flex-direction:column;gap:7px">'
         '<a href="https://cpcese.org.ar/matriculados/honorarios-minimos-eticos" target="_blank" class="btn btn-a btn-sm">Honorarios Minimos Eticos</a>'
-        '<a href="https://cpcese.org.ar/documentos/contadores%20afiche%2001-12-25.pdf" target="_blank" class="btn btn-o btn-sm">Ultima actualizacion (Dic 2025)</a>'
+        '<a href="https://cpcese.org.ar/documentos/Contador%20Publico%20R.%2006-2026%20.pdf" target="_blank" class="btn btn-o btn-sm">Tabla vigente (Res. 06/2026)</a>'
         '<a href="https://autogestion.cpcese.org.ar/materiales" target="_blank" class="btn btn-o btn-sm">Cursos y materiales CPCESE</a>'
         '<a href="https://www.ambito.com/edicion-impresa/hacienda-carnes-y-la-factura-electronica-n3969539" target="_blank" class="btn btn-o btn-sm">Liquidaciones Hacienda</a>'
         '</div></div>'
@@ -6129,7 +6294,7 @@ def novedades():
     body = (
         '<h1 class="page-title">Novedades</h1>'
         '<p class="page-sub">Actualizaciones impositivas, escalas salariales y capacitaciones</p>'
-        + bna_bar + tabs + t_imp + t_sal + t_srt + t_yt + script
+        + bna_bar + tabs + t_imp + t_sal + t_srt + t_yt + t_hon + script
     )
     return page("Novedades", body, "Novedades")
 
@@ -6215,13 +6380,19 @@ def cobro_ocasional():
                      f'<a href="/recibo_ocasional/{ok}" target="_blank" class="btn btn-p btn-sm">📄 Ver recibo</a>'
                      f'<a href="/recibo_ocasional/{ok}?download=1" class="btn btn-o btn-sm">PDF</a>{wa}</div>')
 
-    c.execute("""SELECT id,fecha,nombre_ocasional,concepto,monto,medio,emitido_por,observaciones
+    c.execute("""SELECT id,fecha,nombre_ocasional,concepto,monto,medio,emitido_por,observaciones,numero_recibo
                  FROM pagos WHERE cliente_id IS NULL AND nombre_ocasional IS NOT NULL
                  ORDER BY id DESC LIMIT 60""")
-    lista=c.fetchall();conn.close()
+    lista=c.fetchall()
+    hint_hon=""
+    try:
+        c.execute("SELECT codigo,descripcion,monto FROM honorarios_minimos WHERE codigo IN ('A1','A2','F1','D3_B','E4','D4') ORDER BY orden")
+        hint_hon=" · ".join(f"{_esc(d.split(' (')[0].split(' hasta')[0])}: <b>{fmt(m)}</b>" for _c,d,m in c.fetchall())
+    except Exception: pass
+    conn.close()
     filas=""
-    for pid,fec,nom,conc,monto,medio,emi,obs in lista:
-        filas+=(f'<tr><td class="mu">{_esc(fec or "")}</td><td class="nm">{_esc(nom or "")}</td>'
+    for pid,fec,nom,conc,monto,medio,emi,obs,nrec in lista:
+        filas+=(f'<tr><td class="mu">{_esc(fec or "")}<br>N° {num_recibo(nrec)}</td><td class="nm">{_esc(nom or "")}</td>'
                 f'<td>{_esc(conc or "")}{(" · <span class=mu>"+_esc(obs)+"</span>") if obs else ""}</td>'
                 f'<td style="font-weight:600;color:var(--success)">{fmt(monto)}</td><td class="mu">{_esc(medio or "")}</td>'
                 f'<td class="mu">{_esc(emi or "")}</td>'
@@ -6238,6 +6409,7 @@ def cobro_ocasional():
     <h1 class="page-title">🧾 Cobro a no-cliente</h1>
     <p class="page-sub">Recibos para personas que no son clientes mensuales (consultas, trámites sueltos). Entran en la caja del día.</p>
     {flash}{ok_html}
+    {'<div class="flash fok">✋ Solicitud enviada. El recibo se eliminará cuando el administrador la apruebe.</div>' if request.args.get("solicitud") else ""}
     <div class="fcard"><h3>Emitir recibo</h3>
       <form method="post">
         <div class="fgrid">
@@ -6249,6 +6421,7 @@ def cobro_ocasional():
           <div class="fg"><label>Medio de pago</label><select name="medio">{medios_opts}</select></div>
           <div class="fg"><label>Detalle</label><input name="observaciones" placeholder="Opcional"></div>
         </div>
+        {('<div class="info-box" style="margin-bottom:10px;font-size:.78rem">💲 Honorarios mínimos del Consejo: '+hint_hon+'</div>') if hint_hon else ''}
         <button class="btn btn-g">Emitir recibo</button>
       </form>
     </div>
@@ -6266,25 +6439,28 @@ def eliminar_cobro_ocasional(pid):
     motivo=request.form.get("motivo","").strip() or "Sin motivo"
     conn=conectar();c=conn.cursor()
     filas=_pagos_para_log(c,"p.id=%s AND p.cliente_id IS NULL",(pid,))
-    for _p in filas:
-        registrar_recibo_log(c,"ELIMINADO",_p,detalle="Motivo: "+motivo)
-    if filas:
-        c.execute("DELETE FROM pagos WHERE id=%s AND cliente_id IS NULL",(pid,))
+    if not filas:
+        conn.close(); return redirect("/cobro_ocasional")
+    if session.get("rol")!="admin":
+        _crear_solicitud(c,"BORRAR_OCASIONAL",None,filas[0][2],{"pago_id":pid},
+                         f"Eliminar recibo N° {num_recibo(filas[0][8])} ({fmt(filas[0][5])})",motivo)
+        conn.commit();conn.close()
+        return redirect("/cobro_ocasional?solicitud=1")
+    _exec_borrar_ocasional(c,pid,"Motivo: "+motivo)
     conn.commit();conn.close()
-    if filas:
-        registrar_auditoria("ELIMINAR COBRO OCASIONAL",f"Recibo #{pid} {filas[0][2]} {fmt(filas[0][5])} · {motivo}",None,filas[0][2])
+    registrar_auditoria("ELIMINAR COBRO OCASIONAL",f"Recibo #{pid} {filas[0][2]} {fmt(filas[0][5])} · {motivo}",None,filas[0][2])
     return redirect("/cobro_ocasional")
 
 @app.route("/recibo_ocasional/<int:pid>")
 def ver_recibo_ocasional(pid):
     conn=conectar();c=conn.cursor()
     c.execute("""SELECT nombre_ocasional,cuit_ocasional,COALESCE(concepto,'Consulta'),COALESCE(observaciones,''),
-                        COALESCE(fecha,''),COALESCE(monto,0),COALESCE(periodo,'')
+                        COALESCE(fecha,''),COALESCE(monto,0),COALESCE(periodo,''),numero_recibo
                  FROM pagos WHERE id=%s AND cliente_id IS NULL""",(pid,))
     r=c.fetchone();conn.close()
     if not r: return "Recibo no encontrado (puede haber sido eliminado)",404
-    nombre,doc_enc,concepto,obs,fecha,monto,periodo=r
-    pdf=generar_pdf("9"+str(pid),periodo,monto,0,datos=(nombre,dec(doc_enc) if doc_enc else "",concepto,obs,fecha))
+    nombre,doc_enc,concepto,obs,fecha,monto,periodo,nrec=r
+    pdf=generar_pdf("9"+str(pid),periodo,monto,0,datos=(nombre,dec(doc_enc) if doc_enc else "",concepto,obs,fecha),numero_rec=nrec)
     return send_file(pdf,mimetype="application/pdf",as_attachment=bool(request.args.get("download")),
                      download_name=f"recibo_{(nombre or 'ocasional').replace(' ','_')[:20]}_{pid}.pdf")
 
@@ -6294,7 +6470,7 @@ def _html_recibos_log():
     try:
         conn=conectar();c=conn.cursor()
         c.execute("""SELECT fecha,usuario,rol,accion,persona,fecha_recibo,emitido_por,periodo_antes,monto_antes,medio_antes,
-                            periodo_despues,monto_despues,medio_despues,detalle,pago_id
+                            periodo_despues,monto_despues,medio_despues,detalle,pago_id,numero_recibo
                      FROM recibos_log ORDER BY id DESC LIMIT 300""")
         rows=c.fetchall();conn.close()
     except Exception as e:
@@ -6302,7 +6478,7 @@ def _html_recibos_log():
     if not rows:
         return '<div class="info-box">Todavía no se modificó ni eliminó ningún recibo.</div>'
     filas=""
-    for (fec,usr,rol,acc,pers,frec,emi,per_a,mon_a,med_a,per_d,mon_d,med_d,det,pid) in rows:
+    for (fec,usr,rol,acc,pers,frec,emi,per_a,mon_a,med_a,per_d,mon_d,med_d,det,pid,nrec) in rows:
         if acc=="ELIMINADO":
             badge='<span class="sec-badge danger">🗑 Eliminado</span>'
             cambio=f'{fmt(mon_a or 0)} · {_esc(med_a or "")}{(" · Período "+_esc(per_a)) if per_a else ""}'
@@ -6312,12 +6488,15 @@ def _html_recibos_log():
                     f'<br>→ <b>{fmt(mon_d or 0)}</b> · {_esc(med_d or "")} · {_esc(per_d or "")}')
         quien=_esc(usr or "")+(' <span class="badge bsec">Sec.</span>' if rol=="secretaria" else "")
         filas+=(f'<tr><td class="mu">{_esc(fec or "")}</td><td>{quien}</td><td>{badge}</td>'
-                f'<td class="nm">{_esc(pers or "")}<br><span class="mu">Recibo #{pid or "?"} del {_esc(frec or "")} · emitió {_esc(emi or "")}</span></td>'
+                f'<td class="nm">{_esc(pers or "")}<br><span class="mu">Recibo N° {num_recibo(nrec) if nrec else "#"+str(pid or "?")} del {_esc(frec or "")} · emitió {_esc(emi or "")}</span></td>'
                 f'<td style="font-size:.82rem">{cambio}</td><td class="mu">{_esc(det or "")}</td></tr>')
     return ('<div class="fcard"><h3>🗑 Recibos modificados o eliminados</h3>'
             '<p style="color:var(--muted);font-size:.8rem;margin-bottom:10px">Queda registrado quién lo hizo, cuándo, y cómo era el recibo antes del cambio.</p>'
             '<div class="dtable"><table><thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Recibo de</th><th>Detalle del recibo</th><th>Obs.</th></tr></thead>'
             '<tbody>'+filas+'</tbody></table></div></div>')
+
+from mejoras_module import register_mejoras
+register_mejoras(app)
 
 from iva_module import register_iva
 register_iva(app)
