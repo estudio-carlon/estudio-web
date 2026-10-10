@@ -33,6 +33,7 @@ def register_iva(app):
             "ALTER TABLE iva_control ADD COLUMN IF NOT EXISTS liquidaciones_hacienda REAL DEFAULT 0",
             "ALTER TABLE iva_control ADD COLUMN IF NOT EXISTS liquidaciones_grano REAL DEFAULT 0",
             "ALTER TABLE iva_control ADD COLUMN IF NOT EXISTS notas_credito_iibb REAL DEFAULT 0",
+            "ALTER TABLE iva_control ADD COLUMN IF NOT EXISTS itc_computable REAL DEFAULT 0",
         ]:
             try:
                 c.execute(ddl); conn.commit()
@@ -68,7 +69,7 @@ def register_iva(app):
         c.execute("""SELECT cliente_id,ventas,notas_credito_emitidas,compras,notas_credito_recibidas,
             debito_fiscal,credito_fiscal,saldo_anterior,saldo_libre_disponibilidad,retenciones_percepciones,
             neto_ventas_comprobantes,liquidaciones_hacienda,liquidaciones_grano,notas_credito_iibb,
-            actividad,alicuota_iibb,pagos_cuenta_iibb,retenciones_iibb
+            actividad,alicuota_iibb,pagos_cuenta_iibb,retenciones_iibb,itc_computable
             FROM iva_control WHERE mes=%s AND anio=%s""",(mes,anio))
         datos = {r[0]: r for r in c.fetchall()}
         conn.close()
@@ -80,14 +81,15 @@ def register_iva(app):
             d = datos.get(cid)
             if d:
                 (_,ventas,ncred_e,compras,ncred_r,deb_fiscal,cred_fiscal,saldo_ant,saldo_libre,ret_perc,
-                 comprobantes,liq_hac,liq_gra,nc_iibb,actividad,alicuota,pagos_cta,ret_iibb) = d
+                 comprobantes,liq_hac,liq_gra,nc_iibb,actividad,alicuota,pagos_cta,ret_iibb,itc) = d
             else:
                 ventas=ncred_e=compras=ncred_r=deb_fiscal=cred_fiscal=saldo_ant=saldo_libre=ret_perc=0
-                comprobantes=liq_hac=liq_gra=nc_iibb=pagos_cta=ret_iibb=0
+                comprobantes=liq_hac=liq_gra=nc_iibb=pagos_cta=ret_iibb=itc=0
                 actividad=""; alicuota=3
-            # Saldo final de IVA: Credito Fiscal + Saldo Tecnico Anterior + SLD + Retenciones/Percepciones - Debito Fiscal
+            # Saldo final de IVA: Credito Fiscal + Saldo Tecnico Anterior + SLD + Retenciones/Percepciones + ITC computable - Debito Fiscal
             # Positivo = saldo a favor del contribuyente. Negativo = IVA a pagar.
-            saldo_final = (cred_fiscal or 0) + (saldo_ant or 0) + (saldo_libre or 0) + (ret_perc or 0) - (deb_fiscal or 0)
+            # ITC (Impuesto a los Combustibles sobre gasoil) computable como pago a cuenta, p.ej. actividad de transporte.
+            saldo_final = (cred_fiscal or 0) + (saldo_ant or 0) + (saldo_libre or 0) + (ret_perc or 0) + (itc or 0) - (deb_fiscal or 0)
             # Neto de Ventas (base IIBB) = Comprobantes en linea + Liquidaciones Hacienda + Liquidaciones Grano - Notas de Credito
             neto_ventas_iibb = (comprobantes or 0) + (liq_hac or 0) + (liq_gra or 0) - (nc_iibb or 0)
             iibb_est = neto_ventas_iibb * ((alicuota or 0)/100)
@@ -102,7 +104,7 @@ def register_iva(app):
                     f' data-compras="{compras or 0}" data-ncredr="{ncred_r or 0}"'
                     f' data-debfiscal="{deb_fiscal or 0}" data-credfiscal="{cred_fiscal or 0}"'
                     f' data-saldoant="{saldo_ant or 0}" data-saldolibre="{saldo_libre or 0}"'
-                    f' data-retperc="{ret_perc or 0}"'
+                    f' data-retperc="{ret_perc or 0}" data-itc="{itc or 0}"'
                     f' data-comprobantes="{comprobantes or 0}" data-liqhac="{liq_hac or 0}" data-liqgra="{liq_gra or 0}"'
                     f' data-nciibb="{nc_iibb or 0}" data-actividad="{actividad or ""}"'
                     f' data-alicuota="{alicuota if alicuota is not None else 3}"'
@@ -180,9 +182,10 @@ def register_iva(app):
                     <div class="fg"><label>Saldo Tecnico Anterior</label><input type="number" step="0.01" name="saldo_anterior" id="f_saldoant"></div>
                     <div class="fg"><label>Saldo de Libre Disponibilidad (SLD)</label><input type="number" step="0.01" name="saldo_libre_disponibilidad" id="f_saldolibre"></div>
                     <div class="fg"><label>Retenciones y Percepciones del periodo</label><input type="number" step="0.01" name="retenciones_percepciones" id="f_retperc"></div>
+                    <div class="fg"><label>ITC computable (gasoil - transporte)</label><input type="number" step="0.01" name="itc_computable" id="f_itc"></div>
                 </div>
                 <div class="info-box" style="margin-bottom:12px">
-                    El saldo final de IVA sale de: Credito Fiscal + Saldo Tecnico Anterior + SLD + Retenciones/Percepciones &minus; Debito Fiscal.
+                    El saldo final de IVA sale de: Credito Fiscal + Saldo Tecnico Anterior + SLD + Retenciones/Percepciones + ITC computable &minus; Debito Fiscal.
                     Si da positivo es <b>saldo a favor</b> del contribuyente; si da negativo es <b>IVA a pagar</b>.
                 </div>
                 </div>
@@ -228,6 +231,7 @@ def register_iva(app):
             document.getElementById('f_saldoant').value=b.dataset.saldoant;
             document.getElementById('f_saldolibre').value=b.dataset.saldolibre;
             document.getElementById('f_retperc').value=b.dataset.retperc;
+            document.getElementById('f_itc').value=b.dataset.itc;
             document.getElementById('f_comprobantes').value=b.dataset.comprobantes;
             document.getElementById('f_liqhac').value=b.dataset.liqhac;
             document.getElementById('f_liqgra').value=b.dataset.liqgra;
@@ -287,6 +291,7 @@ def register_iva(app):
         deb_fiscal = num("debito_fiscal"); cred_fiscal = num("credito_fiscal")
         saldo_ant = num("saldo_anterior"); saldo_libre = num("saldo_libre_disponibilidad")
         ret_perc = num("retenciones_percepciones")
+        itc = num("itc_computable")
         comprobantes = num("neto_ventas_comprobantes")
         liq_hac = num("liquidaciones_hacienda"); liq_gra = num("liquidaciones_grano")
         nc_iibb = num("notas_credito_iibb")
@@ -297,8 +302,8 @@ def register_iva(app):
         c.execute("""INSERT INTO iva_control(cliente_id,mes,anio,ventas,notas_credito_emitidas,
             compras,notas_credito_recibidas,debito_fiscal,credito_fiscal,saldo_anterior,saldo_libre_disponibilidad,
             retenciones_percepciones,neto_ventas_comprobantes,liquidaciones_hacienda,liquidaciones_grano,
-            notas_credito_iibb,actividad,alicuota_iibb,pagos_cuenta_iibb,retenciones_iibb,fecha_actualizacion,usuario)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            notas_credito_iibb,actividad,alicuota_iibb,pagos_cuenta_iibb,retenciones_iibb,itc_computable,fecha_actualizacion,usuario)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT(cliente_id,mes,anio) DO UPDATE SET
             ventas=EXCLUDED.ventas, notas_credito_emitidas=EXCLUDED.notas_credito_emitidas,
             compras=EXCLUDED.compras, notas_credito_recibidas=EXCLUDED.notas_credito_recibidas,
@@ -311,10 +316,11 @@ def register_iva(app):
             notas_credito_iibb=EXCLUDED.notas_credito_iibb,
             actividad=EXCLUDED.actividad,
             alicuota_iibb=EXCLUDED.alicuota_iibb, pagos_cuenta_iibb=EXCLUDED.pagos_cuenta_iibb,
-            retenciones_iibb=EXCLUDED.retenciones_iibb, fecha_actualizacion=EXCLUDED.fecha_actualizacion,
+            retenciones_iibb=EXCLUDED.retenciones_iibb, itc_computable=EXCLUDED.itc_computable,
+            fecha_actualizacion=EXCLUDED.fecha_actualizacion,
             usuario=EXCLUDED.usuario""",
             (cliente_id, mes, anio, ventas, ncred_e, compras, ncred_r, deb_fiscal, cred_fiscal, saldo_ant, saldo_libre,
-             ret_perc, comprobantes, liq_hac, liq_gra, nc_iibb, actividad, alicuota, pagos_cta, ret_iibb,
+             ret_perc, comprobantes, liq_hac, liq_gra, nc_iibb, actividad, alicuota, pagos_cta, ret_iibb, itc,
              now_ar(), session.get("display", session.get("user","?"))))
         conn.commit(); conn.close()
         registrar_auditoria("IVA_CONTROL", f"Actualizo control IVA/IIBB periodo {mes}/{anio}", cliente_id)
