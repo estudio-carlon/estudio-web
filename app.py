@@ -405,9 +405,9 @@ function toggleChat(){
 
 def nav_html(active=""):
     user=session.get("user","");rol=session.get("rol","secretaria");disp=session.get("display",user)
-    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
+    links_admin=[("/panel","Panel"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/reportes","Reportes"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/calificaciones","Calificaciones"),("/tareas","Tareas"),("/novedades","Novedades"),("/seguridad","Seguridad"),("/configuracion","Config")]
     links_sup=[("/app","📱 Mi App")]  # supervisor solo ve la app movil
-    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/novedades","Novedades")]
+    links_sec=[("/panel_sec","Inicio"),("/clientes","Clientes"),("/deudas","Deudores"),("/gastos","Gastos"),("/caja","Caja"),("/sueldos","Sueldos"),("/agenda","Agenda"),("/calificaciones","Calificaciones"),("/tareas","Tareas"),("/reportes","Control IVA/IIBB"),("/novedades","Novedades")]
     if rol=="admin": links=links_admin
     elif rol=="supervisor": links=links_sup
     else: links=links_sec
@@ -937,6 +937,14 @@ def logout():
     registrar_evento_seguridad("LOGOUT","Cierre de sesion",get_ip())
     session.clear();return redirect("/")
 
+def _alerta_calificaciones():
+    """Alerta de calificaciones bancarias que vencen en los proximos 30 dias (ver calificaciones_module)."""
+    try:
+        from calificaciones_module import alerta_calificaciones_html
+        return alerta_calificaciones_html()
+    except Exception:
+        return ""
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  PANEL SECRETARIA
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1056,6 +1064,7 @@ def panel_sec():
     </div>
 
     {alerta_venc}
+    {_alerta_calificaciones()}
     {rec_ri}
 
     <!-- Grid principal -->
@@ -1080,6 +1089,7 @@ def panel_sec():
           <a href="/clientes" class="btn btn-p btn-sm">👥 Clientes</a>
           <a href="/caja" class="btn btn-o btn-sm">🏦 Mi Caja</a>
           <a href="/agenda" class="btn btn-o btn-sm">📅 Agenda Vencimientos</a>
+          <a href="/calificaciones" class="btn btn-o btn-sm">🏦 Calificaciones bancarias</a>
           <a href="/novedades" class="btn btn-o btn-sm">📰 Novedades</a>
           <a href="/wa_masivo" class="btn btn-wa btn-sm">📱 WA Masivo</a>
           <a href="https://www.arca.gob.ar/landing/default.asp" target="_blank" class="btn btn-arca btn-sm">ARCA Login</a>
@@ -1163,6 +1173,7 @@ def panel():
         alertas+=f'<div class="warn-box"><b>{n_sin_abono}</b> clientes sin honorario · <a href="/clientes" style="color:#7a5800;font-weight:600">Ver</a></div>'
     if cajas_pendientes>0:
         alertas+=f'<div class="sec-alert"><b>{cajas_pendientes}</b> secretaria(s) sin cerrar caja hoy · <a href="/caja" style="color:#7a1a1a;font-weight:600">Ver caja</a></div>'
+    alertas+=_alerta_calificaciones()
     if alertas_sec>0:
         alertas+=f'<div class="sec-alert">🔴 <b>{alertas_sec}</b> alerta(s) de seguridad pendientes · <a href="/seguridad" style="color:#7a1a1a;font-weight:600">Ver seguridad</a></div>'
     mx_deu=top[0][1] if top else 1
@@ -6503,6 +6514,9 @@ register_iva(app)
 
 from declaraciones_module import register_declaraciones
 register_declaraciones(app)
+
+from calificaciones_module import register_calificaciones
+register_calificaciones(app)
 
 if __name__=="__main__":
         app.run(debug=True)
