@@ -126,14 +126,17 @@ def register_iva(app):
                     bad_iva = f'<span class="badge bp">Saldo a favor {fmt(saldo_final)}</span>'
                 else:
                     bad_iva = '<span class="badge bpar">Sin saldo</span>'
+                tipo_res = "pagar" if saldo_final < 0 else ("favor" if saldo_final > 0 else "cero")
+                fila_style = ('background:#fdecea' if tipo_res == "pagar"
+                              else 'background:#e8f6ee' if tipo_res == "favor" else '')
                 resultado_txt = (f"IVA a pagar {fmt(abs(saldo_final))}" if saldo_final < 0
                                   else f"Saldo a favor {fmt(saldo_final)}" if saldo_final > 0
                                   else "Sin saldo")
                 chk_html = (f'<input type="checkbox" class="chkRep" '
                             f'data-nombre="{nombre}" data-deb="{fmt(deb_fiscal)}" data-cred="{fmt(cred_fiscal)}" '
-                            f'data-resultado="{resultado_txt}" data-neto="{fmt(neto_ventas_iibb)}" data-iibb="{fmt(iibb_neto)}" '
+                            f'data-resultado="{resultado_txt}" data-tipo="{tipo_res}" data-neto="{fmt(neto_ventas_iibb)}" data-iibb="{fmt(iibb_neto)}" '
                             f'{"checked" if saldo_final != 0 else ""}>')
-                filas += f'''<tr>
+                filas += f'''<tr style="{fila_style}">
                     <td>{chk_html}</td>
                     <td class="nm">{nombre}</td>
                     <td>{fmt(deb_fiscal)}</td>
@@ -255,15 +258,17 @@ def register_iva(app):
                 var rows = document.querySelectorAll('.chkRep:checked');
                 if(rows.length === 0){{ return null; }}
                 var filas = '';
-                rows.forEach(function(r){{ filas += '<tr><td>'+r.dataset.nombre+'</td><td>'+r.dataset.deb+'</td><td>'+r.dataset.cred+'</td><td>'+r.dataset.resultado+'</td><td>'+r.dataset.neto+'</td><td>'+r.dataset.iibb+'</td></tr>'; }});
+                rows.forEach(function(r){{ var cls = r.dataset.tipo==='pagar' ? 'pagar' : (r.dataset.tipo==='favor' ? 'favor' : ''); filas += '<tr class="'+cls+'"><td>'+r.dataset.nombre+'</td><td>'+r.dataset.deb+'</td><td>'+r.dataset.cred+'</td><td class="res">'+r.dataset.resultado+'</td><td>'+r.dataset.neto+'</td><td>'+r.dataset.iibb+'</td></tr>'; }});
                 return '<!doctype html><html><head><meta charset="utf-8"><title>Reporte IVA / IIBB - {MESES_NOM[mes]} {anio}</title>'
-                + '<style>body{{font-family:Arial,sans-serif;padding:24px;color:#222}} table{{width:100%;border-collapse:collapse;margin-top:12px}} th,td{{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:.9rem}} th{{background:#f0f0f0}} h2{{margin-bottom:4px}} .sub{{color:#666;margin-bottom:16px}} .no-print button{{padding:8px 14px;font-size:.9rem;cursor:pointer;margin-right:8px}} @media print{{.no-print{{display:none}}}}</style>'
+                + '<style>body{{font-family:Arial,sans-serif;padding:24px;color:#222}} table{{width:100%;border-collapse:collapse;margin-top:12px}} th,td{{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:.9rem}} th{{background:#f0f0f0}} h2{{margin-bottom:4px}} .sub{{color:#666;margin-bottom:16px}} .no-print button{{padding:8px 14px;font-size:.9rem;cursor:pointer;margin-right:8px}} @media print{{.no-print{{display:none}}}} *{{-webkit-print-color-adjust:exact;print-color-adjust:exact}} tr.pagar td{{background:#fdecea}} tr.pagar td.res{{color:#c0392b;font-weight:700}} tr.favor td{{background:#e8f6ee}} tr.favor td.res{{color:#1a7a42;font-weight:700}} .ref{{font-size:.8rem;color:#555;margin-top:10px}} .ref span{{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;margin:0 4px 0 10px}}</style>'
                 + '</head><body>'
                 + '<div class="no-print"><button onclick="window.print()">Descargar como PDF</button> <button onclick="window.close()">Cerrar</button></div>'
                 + '<h2>Reporte de Control IVA / IIBB</h2>'
                 + '<p class="sub">Estudio Carlon - Periodo: {MESES_NOM[mes]} {anio}</p>'
                 + '<table><thead><tr><th>Cliente</th><th>Debito Fiscal</th><th>Credito Fiscal</th><th>Resultado IVA</th><th>Neto Ventas IIBB</th><th>IIBB Neto</th></tr></thead><tbody>'
-                + filas + '</tbody></table></body></html>';
+                + filas + '</tbody></table>'
+                + '<p class="ref">Referencias:<span style="background:#f5b7b1"></span>IVA a pagar<span style="background:#a9dfbf"></span>Saldo a favor</p>'
+                + '</body></html>';
             }}
             function abrirReporteIva(descargar){{
                 var html = armarReporteIvaHtml();
