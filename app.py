@@ -2865,6 +2865,27 @@ def editar_debe(cliente_id):
     registrar_auditoria("EDITAR_DEUDA",det,cliente_id,nombre)
     return redirect(f"/cuenta/{cliente_id}?deb=1")
 
+@app.route("/agregar_deuda/<int:cliente_id>", methods=["POST"])
+@login_req
+def agregar_deuda(cliente_id):
+    """Carga una deuda por otro concepto (DJ Ganancias, Bienes Personales, etc.) como renglon del estado de cuenta."""
+    concepto=request.form.get("concepto","").strip()
+    detalle=request.form.get("detalle","").strip()
+    try: monto=round(float(request.form.get("monto","") or 0),2)
+    except Exception: monto=0
+    etiqueta=(concepto+(" "+detalle if detalle else "")).strip()[:60]
+    if not etiqueta or monto<=0:
+        return redirect(f"/cuenta/{cliente_id}?ad=err")
+    conn=conectar();c=conn.cursor()
+    nombre=_nombre_cliente(c,cliente_id)
+    c.execute("SELECT 1 FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,etiqueta))
+    if c.fetchone():
+        conn.close();return redirect(f"/cuenta/{cliente_id}?ad=existe")
+    c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(cliente_id,etiqueta,monto))
+    conn.commit();conn.close()
+    registrar_auditoria("AGREGAR_DEUDA",f"{etiqueta}: {fmt(monto)}",cliente_id,nombre)
+    return redirect(f"/cuenta/{cliente_id}?ad=1")
+
 @app.route("/recalcular_deuda/<int:cliente_id>", methods=["POST"])
 @login_req
 def recalcular_deuda(cliente_id):
@@ -2882,7 +2903,7 @@ def recalcular_deuda(cliente_id):
     c.execute("SELECT periodo,COALESCE(debe,0) FROM cuentas WHERE cliente_id=%s AND COALESCE(haber,0)=0",(cliente_id,))
     cambios=[]
     for per,debe in c.fetchall():
-        if per and per not in con_pago and abs(float(debe)-abono)>0.5:
+        if per and len(per)==7 and per[2]=="/" and per[:2].isdigit() and per[3:].isdigit() and per not in con_pago and abs(float(debe)-abono)>0.5:
             c.execute("UPDATE cuentas SET debe=%s WHERE cliente_id=%s AND periodo=%s",(abono,cliente_id,per))
             cambios.append(f"{per}: {fmt(debe)} -> {fmt(abono)}")
     conn.commit();conn.close()
@@ -2996,6 +3017,10 @@ def cuenta(id):
     conn=conectar();c=conn.cursor();flash=""
     if request.args.get("solicitud"):
         flash='<div class="flash fok">✋ Solicitud enviada al administrador. El cambio se aplica cuando lo apruebe (Caja → Solicitudes).</div>'
+    _ad=request.args.get("ad")
+    if _ad=="1": flash='<div class="flash fok">Deuda agregada al estado de cuenta.</div>'
+    elif _ad=="existe": flash='<div class="flash ferr">Ya existe un renglón con ese concepto. Cambiá el detalle (ej. el año).</div>'
+    elif _ad=="err": flash='<div class="flash ferr">Completá el concepto y un monto mayor a cero.</div>'
     if request.args.get("deb")=="existe":
         flash='<div class="flash ferr">Ya existe ese periodo para el cliente. No se hizo ningún cambio.</div>'
     elif request.args.get("deb"):
@@ -3322,6 +3347,24 @@ def cuenta(id):
       </div>
       <div>
         {box_adeudados}
+        <div class="fcard" style="margin-bottom:12px">
+          <h3>➕ Agregar deuda (otro concepto)</h3>
+          <form method="post" action="/agregar_deuda/{id}">
+            <div class="fg" style="margin-bottom:8px"><label>Concepto</label>
+              <select name="concepto">
+                <option>Honorarios DJ Ganancias</option>
+                <option>Honorarios DJ Bienes Personales</option>
+                <option>Honorarios Ingresos Brutos</option>
+                <option>Honorarios IVA</option>
+                <option>Honorarios Balance</option>
+                <option>Honorarios Certificación</option>
+                <option>Otro</option>
+              </select></div>
+            <div class="fg" style="margin-bottom:8px"><label>Detalle / año</label><input name="detalle" placeholder="ej. 2025" maxlength="40"></div>
+            <div class="fg" style="margin-bottom:10px"><label>Monto $</label><input name="monto" type="number" step="0.01" min="1" required></div>
+            <button class="btn btn-p btn-sm">Agregar deuda</button>
+          </form>
+        </div>
         <!-- Registro masivo historico (solo admin) -->
         {'<div class="fcard" style="border:2px dashed var(--warning);margin-bottom:12px">'
         '<h3 style="color:var(--warning)">⚡ Registro histórico masivo</h3>'
