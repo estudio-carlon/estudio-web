@@ -222,7 +222,7 @@ nav{background:var(--primary);padding:0 28px;display:flex;align-items:center;jus
 .fg input:focus,.fg select:focus,.fg textarea:focus{border-color:var(--primary);background:#fff}
 .search{display:flex;align-items:center;gap:9px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:8px 14px;margin-bottom:14px;box-shadow:var(--shadow)}
 .search input{border:none;background:none;outline:none;font-family:'DM Sans',sans-serif;font-size:.9rem;width:100%}
-.dtable{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;margin-bottom:22px}
+.dtable{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;margin-bottom:22px}
 .dtable table{width:100%;border-collapse:collapse}
 .dtable thead tr{background:var(--primary)}
 .dtable thead th{color:rgba(255,255,255,.72);font-size:.68rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;padding:11px 14px;text-align:left}
@@ -2190,7 +2190,7 @@ def clientes():
             # Todos pueden dar de baja, solo admin puede eliminar
             btn_del='<a href="/baja_cliente/'+str(cid)+'" class="btn btn-xs btn-o" title="Dar de baja">Dar de baja</a>'
         rows+=f'''<tr data-search="{nombre.lower()} {(cuit_d or "").lower()} {(email_d or "").lower()} {(actividad or "").lower()}">
-          <td class="nm">{nombre}{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
+          <td class="nm"><a href="/cuenta/{cid}" style="color:inherit;text-decoration:none" title="Ver cuenta">{nombre}</a>{ri_icon}{wa_icon}<br><span style="font-size:.7rem;color:var(--muted)">{actividad or ""}</span></td>
           <td class="mu">{cuit_d or "---"}<br>{cond_badge}{cat_iibb_badge}{flags_badge}</td>
           <td class="mu">{tel_d or "---"}</td>
           <td class="mu">{email_d or "---"}</td>
