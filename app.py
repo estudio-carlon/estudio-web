@@ -2763,7 +2763,7 @@ def borrar_pagos_masivo(cliente_id):
     motivo=request.form.get("motivo","").strip()
     if not periodos_raw:
         return redirect(f"/cuenta/{cliente_id}")
-    periodos=[p.replace("-","/").strip() for p in periodos_raw.split(",") if p.strip()]
+    periodos=[desc_periodo(p) for p in periodos_raw.split(",") if p.strip()]
     conn=conectar();c=conn.cursor()
     nombre=_nombre_cliente(c,cliente_id)
     if session.get("rol")!="admin":
@@ -2781,7 +2781,7 @@ def borrar_pagos_masivo(cliente_id):
 @app.route("/borrar_pago/<int:cliente_id>/<path:periodo>")
 @login_req
 def borrar_pago(cliente_id, periodo):
-    periodo = periodo.replace("-","/")
+    periodo = desc_periodo(periodo)
     motivo=request.args.get("motivo","").strip()
     conn=conectar();c=conn.cursor()
     nombre=_nombre_cliente(c,cliente_id)
@@ -4753,7 +4753,7 @@ def ver_recibo_consolidado(cliente_id):
     total_param=request.args.get("total","0")
     if not periodos_raw:
         return "Sin periodos seleccionados",400
-    periodos=[p.replace("-","/") for p in periodos_raw.split(",")]
+    periodos=[desc_periodo(p) for p in periodos_raw.split(",")]
     try: total_manual=float(total_param)
     except: total_manual=0
 
@@ -5077,9 +5077,13 @@ def generar_pdf(cliente_id, periodo, monto, saldo_pendiente=0, datos=None, numer
 
     cv.save();buffer.seek(0);return buffer
 
+def desc_periodo(p):
+    """Revierte el escape de URL del periodo ('/' -> '-') sin romper rangos como '11/2026 - 12/2026'."""
+    return re.sub(r'(?<=\d)-(?=\d)', '/', p or '').strip()
+
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
 def ver_recibo(cliente_id,periodo):
-    periodo=periodo.replace("-","/")
+    periodo=desc_periodo(periodo)
     conn=conectar();c=conn.cursor()
     c.execute("SELECT debe,haber FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
     data=c.fetchone();conn.close()
