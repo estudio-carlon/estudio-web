@@ -2763,8 +2763,8 @@ def borrar_pagos_masivo(cliente_id):
     motivo=request.form.get("motivo","").strip()
     if not periodos_raw:
         return redirect(f"/cuenta/{cliente_id}")
-    periodos=[desc_periodo(p) for p in periodos_raw.split(",") if p.strip()]
     conn=conectar();c=conn.cursor()
+    periodos=[resolver_periodo(c,cliente_id,p) for p in periodos_raw.split(",") if p.strip()]
     nombre=_nombre_cliente(c,cliente_id)
     if session.get("rol")!="admin":
         c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s AND periodo=ANY(%s)",(cliente_id,periodos))
@@ -2781,9 +2781,9 @@ def borrar_pagos_masivo(cliente_id):
 @app.route("/borrar_pago/<int:cliente_id>/<path:periodo>")
 @login_req
 def borrar_pago(cliente_id, periodo):
-    periodo = desc_periodo(periodo)
     motivo=request.args.get("motivo","").strip()
     conn=conectar();c=conn.cursor()
+    periodo = resolver_periodo(c,cliente_id,periodo)
     nombre=_nombre_cliente(c,cliente_id)
     c.execute("SELECT COALESCE(SUM(monto),0) FROM pagos WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
     total_pago=c.fetchone()[0]
@@ -4753,11 +4753,11 @@ def ver_recibo_consolidado(cliente_id):
     total_param=request.args.get("total","0")
     if not periodos_raw:
         return "Sin periodos seleccionados",400
-    periodos=[desc_periodo(p) for p in periodos_raw.split(",")]
     try: total_manual=float(total_param)
     except: total_manual=0
 
     conn=conectar();c=conn.cursor()
+    periodos=[resolver_periodo(c,cliente_id,p) for p in periodos_raw.split(",")]
     c.execute("SELECT nombre,cuit,abono FROM clientes WHERE id=%s",(cliente_id,))
     cli=c.fetchone()
     if not cli: conn.close(); return "Cliente no encontrado",404
@@ -5081,10 +5081,25 @@ def desc_periodo(p):
     """Revierte el escape de URL del periodo ('/' -> '-') sin romper rangos como '11/2026 - 12/2026'."""
     return re.sub(r'(?<=\d)-(?=\d)', '/', p or '').strip()
 
+def resolver_periodo(c, cliente_id, raw):
+    """Devuelve el periodo tal como esta guardado. El link cambia '/' por '-', asi que es ambiguo:
+    '11-2026' es '11/2026', pero '2024-2025' puede estar guardado con guion. Prueba las variantes."""
+    raw=(raw or '').strip()
+    cands=[]
+    for p in (desc_periodo(raw), raw, raw.replace('-','/').strip()):
+        if p and p not in cands: cands.append(p)
+    c.execute("""SELECT periodo FROM cuentas WHERE cliente_id=%s AND periodo=ANY(%s)
+                 UNION SELECT periodo FROM pagos WHERE cliente_id=%s AND periodo=ANY(%s)""",
+              (cliente_id,cands,cliente_id,cands))
+    existentes={r[0] for r in c.fetchall()}
+    for p in cands:
+        if p in existentes: return p
+    return cands[0] if cands else raw
+
 @app.route("/recibo/<int:cliente_id>/<path:periodo>")
 def ver_recibo(cliente_id,periodo):
-    periodo=desc_periodo(periodo)
     conn=conectar();c=conn.cursor()
+    periodo=resolver_periodo(c,cliente_id,periodo)
     c.execute("SELECT debe,haber FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
     data=c.fetchone();conn.close()
     if not data: return "No hay datos para ese período",404
