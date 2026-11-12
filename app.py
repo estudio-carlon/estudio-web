@@ -627,13 +627,27 @@ def actualizar_db():
         except: conn.rollback()
     conn.commit();conn.close()
 
+def _cubierto_por_rango(c, cid, periodo):
+    """True si el periodo ya esta incluido en una fila de rango/lista (ej. '11/2026 - 12/2026') con pago."""
+    c.execute("SELECT periodo FROM cuentas WHERE cliente_id=%s AND COALESCE(haber,0)>0 AND periodo<>%s AND (periodo LIKE '%%-%%' OR periodo LIKE '%%,%%')",(cid,periodo))
+    return any(periodo in expandir_periodos(r[0]) for r in c.fetchall())
+
 def generar_deuda_mensual():
     conn=conectar();c=conn.cursor()
     periodo=datetime.now().strftime("%m/%Y")
     c.execute("SELECT id,abono FROM clientes")
     for cid,abono in c.fetchall():
-        c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cid,periodo))
-        if not c.fetchone():
+        cubierto=_cubierto_por_rango(c,cid,periodo)
+        c.execute("SELECT id,COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cid,periodo))
+        fila=c.fetchone()
+        if cubierto:
+            # Ya pagado dentro de un rango: quitar la deuda generada automaticamente (sin pagos) si existe
+            if fila and float(fila[1])==0:
+                c.execute("SELECT 1 FROM pagos WHERE cliente_id=%s AND periodo=%s LIMIT 1",(cid,periodo))
+                if not c.fetchone():
+                    c.execute("DELETE FROM cuentas WHERE id=%s",(fila[0],))
+            continue
+        if not fila:
             c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(cid,periodo,abono or 0))
     conn.commit();conn.close()
 
