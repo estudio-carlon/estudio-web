@@ -637,6 +637,42 @@ def generar_deuda_mensual():
             c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(cid,periodo,abono or 0))
     conn.commit();conn.close()
 
+def expandir_periodos(txt):
+    """'11/2026 - 01/2027' -> ['11/2026','12/2026','01/2027']; '10/2026, 11/2026' -> lista.
+    Devuelve [] si el texto no es un rango/lista de periodos MM/AAAA."""
+    import re as _re
+    t=(txt or "").strip()
+    toks=_re.findall(r"(\d{1,2})\s*/\s*(\d{4})",t)
+    if len(toks)<2: return []
+    resto=_re.sub(r"\d{1,2}\s*/\s*\d{4}","",t)
+    if _re.sub(r"[\s,;\-–a]+","",resto): return []
+    pers=[(int(a),int(m)) for m,a in toks]
+    if any(not 1<=m<=12 for _,m in pers): return []
+    if len(pers)==2 and _re.search(r"[\-–]|\ba\b",resto):
+        (a1,m1),(a2,m2)=pers
+        i1,i2=a1*12+m1-1,a2*12+m2-1
+        if i2<i1 or i2-i1>36: return []
+        return [f"{i%12+1:02d}/{i//12}" for i in range(i1,i2+1)]
+    return [f"{m:02d}/{a}" for a,m in pers]
+
+def aplicar_pago_periodos(c, cliente_id, periodos, pago):
+    """Imputa el pago a cada periodo cubriendo su saldo en orden; el sobrante va al ultimo.
+    Si el periodo no existe todavia, lo crea con el honorario actual (asi no se vuelve a generar como deuda)."""
+    c.execute("SELECT COALESCE(abono,0) FROM clientes WHERE id=%s",(cliente_id,))
+    r=c.fetchone();abono=float(r[0]) if r else 0
+    restante=float(pago)
+    for i,per in enumerate(periodos):
+        c.execute("SELECT COALESCE(debe,0),COALESCE(haber,0) FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,per))
+        row=c.fetchone()
+        if not row:
+            c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,%s,0)",(cliente_id,per,abono))
+            row=(abono,0)
+        saldo=max(float(row[0])-float(row[1]),0)
+        imp=restante if i==len(periodos)-1 else min(restante,saldo)
+        if imp>0:
+            c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(imp,cliente_id,per))
+            restante-=imp
+
 def registrar_auditoria(accion,detalle,cliente_id=None,cliente_nombre=""):
     try:
         conn=conectar();c=conn.cursor()
@@ -2797,6 +2833,63 @@ def borrar_pago(cliente_id, periodo):
     registrar_auditoria("BORRAR_PAGO",f"Eliminado pago {fmt(total_pago)} periodo {periodo}",cliente_id,nombre)
     return redirect(f"/cuenta/{cliente_id}")
 
+@app.route("/editar_debe/<int:cliente_id>", methods=["POST"])
+@login_req
+def editar_debe(cliente_id):
+    """Cambia el monto adeudado (debe) de un periodo pendiente. Solo admin."""
+    if session.get("rol")!="admin":
+        return redirect(f"/cuenta/{cliente_id}")
+    periodo=request.form.get("periodo","").strip()
+    nuevo_per=request.form.get("nuevo_periodo","").strip() or periodo
+    try: nuevo=round(float(request.form.get("nuevo_debe","") or 0),2)
+    except Exception: nuevo=-1
+    if not periodo or nuevo<0:
+        return redirect(f"/cuenta/{cliente_id}")
+    conn=conectar();c=conn.cursor()
+    nombre=_nombre_cliente(c,cliente_id)
+    c.execute("SELECT COALESCE(debe,0) FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,periodo))
+    row=c.fetchone()
+    if not row:
+        conn.close();return redirect(f"/cuenta/{cliente_id}")
+    antes=float(row[0])
+    if nuevo_per!=periodo:
+        c.execute("SELECT 1 FROM cuentas WHERE cliente_id=%s AND periodo=%s",(cliente_id,nuevo_per))
+        if c.fetchone():
+            conn.close();return redirect(f"/cuenta/{cliente_id}?deb=existe")
+        # mover el periodo y sus pagos (si tiene pago parcial) al nuevo periodo
+        c.execute("UPDATE cuentas SET periodo=%s WHERE cliente_id=%s AND periodo=%s",(nuevo_per,cliente_id,periodo))
+        c.execute("UPDATE pagos SET periodo=%s WHERE cliente_id=%s AND periodo=%s",(nuevo_per,cliente_id,periodo))
+    c.execute("UPDATE cuentas SET debe=%s WHERE cliente_id=%s AND periodo=%s",(nuevo,cliente_id,nuevo_per))
+    conn.commit();conn.close()
+    det=f"Periodo {periodo}: debe {fmt(antes)} -> {fmt(nuevo)}"+(f" | periodo cambiado a {nuevo_per}" if nuevo_per!=periodo else "")
+    registrar_auditoria("EDITAR_DEUDA",det,cliente_id,nombre)
+    return redirect(f"/cuenta/{cliente_id}?deb=1")
+
+@app.route("/recalcular_deuda/<int:cliente_id>", methods=["POST"])
+@login_req
+def recalcular_deuda(cliente_id):
+    """Pasa al honorario actual todos los periodos sin ningun pago. Solo admin."""
+    if session.get("rol")!="admin":
+        return redirect(f"/cuenta/{cliente_id}")
+    conn=conectar();c=conn.cursor()
+    nombre=_nombre_cliente(c,cliente_id)
+    c.execute("SELECT COALESCE(abono,0) FROM clientes WHERE id=%s",(cliente_id,))
+    r=c.fetchone();abono=float(r[0]) if r else 0
+    if abono<=0:
+        conn.close();return redirect(f"/cuenta/{cliente_id}")
+    c.execute("SELECT DISTINCT periodo FROM pagos WHERE cliente_id=%s",(cliente_id,))
+    con_pago={x[0] for x in c.fetchall()}
+    c.execute("SELECT periodo,COALESCE(debe,0) FROM cuentas WHERE cliente_id=%s AND COALESCE(haber,0)=0",(cliente_id,))
+    cambios=[]
+    for per,debe in c.fetchall():
+        if per and per not in con_pago and abs(float(debe)-abono)>0.5:
+            c.execute("UPDATE cuentas SET debe=%s WHERE cliente_id=%s AND periodo=%s",(abono,cliente_id,per))
+            cambios.append(f"{per}: {fmt(debe)} -> {fmt(abono)}")
+    conn.commit();conn.close()
+    if cambios:
+        registrar_auditoria("RECALCULAR_DEUDA","; ".join(cambios),cliente_id,nombre)
+    return redirect(f"/cuenta/{cliente_id}?recalc={len(cambios)}")
+
 @app.route("/editar_pago", methods=["POST"])
 @login_req
 def editar_pago():
@@ -2903,6 +2996,14 @@ def cuenta(id):
     conn=conectar();c=conn.cursor();flash=""
     if request.args.get("solicitud"):
         flash='<div class="flash fok">✋ Solicitud enviada al administrador. El cambio se aplica cuando lo apruebe (Caja → Solicitudes).</div>'
+    if request.args.get("deb")=="existe":
+        flash='<div class="flash ferr">Ya existe ese periodo para el cliente. No se hizo ningún cambio.</div>'
+    elif request.args.get("deb"):
+        flash='<div class="flash fok">Periodo actualizado.</div>'
+    if request.args.get("recalc") is not None:
+        _n=request.args.get("recalc","0")
+        flash=('<div class="flash fok">Se actualizaron '+_n+' periodo(s) impagos al honorario actual.</div>' if _n not in ("","0")
+               else '<div class="flash fok">No había periodos impagos con un monto distinto al honorario actual.</div>')
     if request.method=="POST":
         tipo_reg=request.form.get("tipo_registro","simple")
         pago=float(request.form.get("pago",0) or 0)
@@ -2912,6 +3013,8 @@ def cuenta(id):
         concepto=request.form.get("concepto","Honorarios mensuales").strip()
         periodos_sel=request.form.getlist("periodos_sel")
         periodo_simple=request.form.get("periodo","").strip()
+        if tipo_reg=="simple" and expandir_periodos(periodo_simple):
+            periodos_sel=expandir_periodos(periodo_simple);tipo_reg="multiple"
         saldo_manual=float(request.form.get("saldo_manual",0) or 0)
         c.execute("SELECT nombre FROM clientes WHERE id=%s",(id,));nom=c.fetchone();nombre_cli=nom[0] if nom else "?"
 
@@ -2920,11 +3023,10 @@ def cuenta(id):
             n_per=len(periodos_sel)
             monto_por_per=round(pago/n_per,2) if n_per>0 else pago
             periodos_str=",".join(periodos_sel)
-            for per in periodos_sel:
-                c.execute("SELECT id FROM cuentas WHERE cliente_id=%s AND periodo=%s",(id,per))
-                row=c.fetchone()
-                if row: c.execute("UPDATE cuentas SET haber=COALESCE(haber,0)+%s WHERE cliente_id=%s AND periodo=%s",(monto_por_per,id,per))
-                else: c.execute("INSERT INTO cuentas(cliente_id,periodo,debe,haber) VALUES(%s,%s,0,%s)",(id,per,monto_por_per))
+            # ordenar cronologicamente e imputar cubriendo el saldo de cada periodo
+            periodos_sel=sorted(dict.fromkeys(periodos_sel),key=lambda x:(x[-4:],x[:2]))
+            periodos_str=",".join(periodos_sel)
+            aplicar_pago_periodos(c,id,periodos_sel,pago)
             # Si hay saldo a favor o deudor
             if saldo_manual!=0:
                 per_saldo=periodos_sel[-1]
@@ -3046,6 +3148,11 @@ def cuenta(id):
                 +' class="btn btn-xs btn-wa waBtn">WA</button>')
         else:
             bw=""
+        if session.get("rol")=="admin" and saldo>0.5:
+            bdeb=('<button data-per="'+d[0]+'" data-deb="'+str(round(d[1]))+'" data-hab="'+str(round(d[2]))+'"'
+                  +' class="btn btn-xs btn-o debBtn" title="Editar monto adeudado">✎ Monto</button>')
+        else:
+            bdeb=''
         bdel=('  <a href="/borrar_pago/'+str(id)+'/'+per_esc+'" class="btn btn-xs btn-r" onclick="var m=prompt(\'Eliminar pago de '+str(d[0])+'. Motivo:\');if(!m)return false;this.href=this.href.split(\'?\')[0]+\'?motivo=\'+encodeURIComponent(m);return true;" title="Eliminar">🗑</a>')
         # link recibo publico para compartir
         _base=os.getenv('BASE_URL','https://estudio-web-1.onrender.com')
@@ -3079,7 +3186,7 @@ def cuenta(id):
                +'<div style="display:flex;gap:5px;flex-wrap:wrap">'
                +'<a href="/recibo/'+str(id)+'/'+per_esc+'" target="_blank" class="btn btn-xs btn-o">Ver</a>'
                +'<a href="/recibo/'+str(id)+'/'+per_esc+'?download=1" class="btn btn-xs btn-o">PDF</a>'
-               +bwr+bem+bp+ba+bc+bw+bdel+'</div></div>')
+               +bwr+bem+bp+bdeb+ba+bc+bw+bdel+'</div></div>')
     hist_rows=""
     for h in historial:
         # Safety: pad h to at least 11 elements
@@ -3160,6 +3267,20 @@ def cuenta(id):
         +periodos_deudores_html
         +'</div></div>'
     )
+    # Recuadro lateral: detalle de honorarios adeudados por periodo
+    _adeud=[(d[0],d[1]-d[2],d[2]) for d in datos if d[0] and d[1]-d[2]>0.5]
+    _adeud.sort(key=lambda x:(x[0][-4:],x[0][:2]))
+    if _adeud:
+        box_adeudados=('<div class="fcard" style="border:2px solid var(--danger);margin-bottom:12px">'
+            +'<h3 style="color:var(--danger)">⚠ Honorarios adeudados</h3>'
+            +''.join('<div style="display:flex;justify-content:space-between;font-size:.86rem;padding:3px 0;border-bottom:1px dashed var(--border)">'
+                     +'<span><b>'+p_+'</b>'+(' <span style="color:var(--muted);font-size:.74rem">(saldo de pago parcial)</span>' if h_>0 else '')+'</span>'
+                     +'<span>'+fmt(s_)+'</span></div>' for p_,s_,h_ in _adeud)
+            +'<div style="display:flex;justify-content:space-between;font-weight:700;margin-top:6px"><span>Total</span><span>'+fmt(sum(x[1] for x in _adeud))+'</span></div>'
+            +'<p style="font-size:.74rem;color:var(--muted);margin-top:6px">Para cobrar varios juntos usá "Varios periodos" o escribí el rango (ej. 10/2026 - 11/2026): se imputa a estos mismos periodos.</p>'
+            +'</div>')
+    else:
+        box_adeudados='<div class="fcard" style="border:2px solid var(--success);margin-bottom:12px"><h3 style="color:var(--success)">✔ Sin honorarios adeudados</h3></div>'
     tel_disp=(tel or "---") if (tel or "").strip() not in ("","nan","NaN","None") else "---"
     body=f"""
     <a href="/clientes" class="btn btn-o btn-sm" style="margin-bottom:18px">&larr; Clientes</a>
@@ -3192,10 +3313,15 @@ def cuenta(id):
           <button onclick="abrirReciboConsolidado()" class="btn btn-xs btn-g" id="btn-consolid" style="display:none">📄 Recibo consolidado</button>
           <button onclick="borrarSeleccionados()" class="btn btn-xs btn-r" id="btn-borrar-sel" style="display:none">🗑 Eliminar seleccionados</button>
           <span id="sel-count" style="font-size:.78rem;color:var(--danger);font-weight:700"></span>
+          {('<form method="post" action="/recalcular_deuda/'+str(id)+'" style="margin:0 0 0 auto" onsubmit="return confirm(\'¿Pasar todos los periodos SIN PAGOS al honorario actual de '+fmt(abono_cli)+'? Los periodos pagados o con pago parcial no se tocan.\')"><button class="btn btn-xs btn-p" title="Actualiza los periodos impagos al honorario actual">♻ Recalcular con honorario actual ('+fmt(abono_cli)+')</button></form>') if session.get("rol")=="admin" and abono_cli>0 else ""}
         </div>
+        <form id="form-editar-debe" method="post" action="/editar_debe/{id}" style="display:none">
+          <input type="hidden" name="periodo" id="deb-periodo"><input type="hidden" name="nuevo_debe" id="deb-monto"><input type="hidden" name="nuevo_periodo" id="deb-nuevo-per">
+        </form>
         {filas}
       </div>
       <div>
+        {box_adeudados}
         <!-- Registro masivo historico (solo admin) -->
         {'<div class="fcard" style="border:2px dashed var(--warning);margin-bottom:12px">'
         '<h3 style="color:var(--warning)">⚡ Registro histórico masivo</h3>'
@@ -3484,6 +3610,22 @@ def cuenta(id):
       if(b){{abrirPago(b.dataset.per,parseInt(b.dataset.sal));}}
       var w=e.target.closest('.waBtn');
       if(w){{abrirWA(w.dataset.per,parseInt(w.dataset.sal));}}
+      var db=e.target.closest('.debBtn');
+      if(db){{
+        var per=db.dataset.per, hab=parseInt(db.dataset.hab||0);
+        var m=prompt('Monto total del periodo '+per+(hab>0?' (ya tiene pagado $'+hab.toLocaleString('es-AR')+')':'')+':',db.dataset.deb);
+        if(m===null) return;
+        m=m.replace(/[$\\s.]/g,'').replace(',','.');
+        if(m===''||isNaN(m)||parseFloat(m)<0){{alert('Monto invalido');return;}}
+        var np=prompt('Periodo (MM/AAAA):',per);
+        if(np===null) return;
+        np=np.trim();
+        if(!/^(0[1-9]|1[0-2])\\/\\d{{4}}$/.test(np)){{alert('Periodo invalido, usar MM/AAAA');return;}}
+        document.getElementById('deb-periodo').value=per;
+        document.getElementById('deb-nuevo-per').value=np;
+        document.getElementById('deb-monto').value=m;
+        document.getElementById('form-editar-debe').submit();
+      }}
     }});
     // Redirigir a ARCA al tildar Facturado
     var fChk=document.getElementById('chk-fact');
